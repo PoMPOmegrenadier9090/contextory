@@ -242,7 +242,7 @@ export const packageMacDesktop = (): void => {
       plist,
     ]);
     createIcon(
-      join(repo, "apps", "web", "public", "icon-512.png"),
+      join(repo, "apps", "web", "public", "icon.png"),
       join(resources, "pkm.icns"),
       stage,
     );
