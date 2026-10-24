@@ -1,0 +1,23 @@
+node_modules/
+.pnpm-store/
+dist/
+dist-*/
+coverage/
+release/
+.DS_Store
+__pycache__/
+*.tsbuildinfo
+
+# Manual sync checks may contain personal notes and attachments.
+/fixtures/vault-v1-sync-test/
+
+# Vault-local derived and operational data
+.pkm/
+*.sqlite-wal
+*.sqlite-shm
+
+# Deployment secrets and local volumes
+deploy/.env
+deploy/data/
+
+tunnel.log

@@ -1,0 +1,38 @@
+{
+  "name": "pkms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "corepack pnpm -r --if-present build",
+    "check": "corepack pnpm format:check && corepack pnpm typecheck && corepack pnpm lint && corepack pnpm test",
+    "format": "prettier --write \"**/*.{css,html,json,js,ts,tsx,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{css,html,json,js,ts,tsx,yaml,yml}\"",
+    "lint": "eslint apps packages",
+    "desktop": "corepack pnpm --filter @pkm/desktop desktop",
+    "desktop:package": "corepack pnpm --filter @pkm/desktop package",
+    "pkm": "node apps/server/dist/cli-main.js",
+    "server": "corepack pnpm --filter @pkm/server server",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b",
+    "mcp:bridge": "node packages/mcp/dist/bridge-main.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^24.13.6",
+    "@types/write-file-atomic": "^4.0.3",
+    "@vitest/coverage-v8": "^5.0.1",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.8",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}

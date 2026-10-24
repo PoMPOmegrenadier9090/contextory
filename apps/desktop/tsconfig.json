@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "references": [
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/storage-node"
+    },
+    {
+      "path": "../../packages/ui"
+    },
+    {
+      "path": "../../packages/mcp"
+    }
+  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

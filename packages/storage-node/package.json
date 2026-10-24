@@ -1,0 +1,23 @@
+{
+  "name": "@pkm/storage-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@pkm/contracts": "workspace:*",
+    "@pkm/core": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "chokidar": "^5.0.0",
+    "parse5": "7.3.0",
+    "write-file-atomic": "^8.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

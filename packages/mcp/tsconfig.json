@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "types": ["node"]
+  },
+  "references": [
+    {
+      "path": "../contracts"
+    },
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../storage-node"
+    }
+  ],
+  "include": ["src/**/*.ts"]
+}

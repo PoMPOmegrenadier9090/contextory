@@ -1,0 +1,89 @@
+name: pkms
+
+services:
+  # Creates the receive directory and ignore boundary before Syncthing starts.
+  vault-prepare:
+    image: alpine:3.22
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /data/vault /server-data
+        if [ ! -e /data/vault/.stignore ]; then
+          printf '// PKM device-local state (managed by pkms)\n/.pkm\n/.git\n' > /data/vault/.stignore
+        fi
+        chown 1000:1000 /data/vault /data/vault/.stignore /config /server-data
+    volumes:
+      - vault:/data/vault
+      - syncthing-config:/config
+      - server-data:/server-data
+    restart: "no"
+
+  syncthing:
+    image: ${SYNCTHING_IMAGE:-syncthing/syncthing:latest}
+    hostname: pkms-server
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      STGUIADDRESS: 0.0.0.0:8384
+    volumes:
+      - vault:/var/syncthing/vault
+      - syncthing-config:/var/syncthing/config
+    ports:
+      - "127.0.0.1:${SYNCTHING_GUI_PORT:-8385}:8384"
+      - "${SYNCTHING_SYNC_PORT:-22000}:22000/tcp"
+      - "${SYNCTHING_SYNC_PORT:-22000}:22000/udp"
+    depends_on:
+      vault-prepare:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  pkm:
+    profiles: [web, tunnel]
+    build:
+      context: .
+    init: true
+    environment:
+      PKM_SERVER_DATA_DIR: /server-data
+      PKM_MCP_ENABLED: ${PKM_MCP_ENABLED:-0}
+      PKM_MCP_AUTH: ${PKM_MCP_AUTH:-token}
+      PKM_MCP_HOST: ${PKM_MCP_HOST:-0.0.0.0}
+      PKM_MCP_PORT: "3211"
+      PKM_MCP_WRITES: ${PKM_MCP_WRITES:-0}
+      PKM_MCP_TOKEN: ${PKM_MCP_TOKEN:-${MCP_BEARER_TOKEN:-}}
+      PKM_MCP_OAUTH_ISSUER: ${PKM_MCP_OAUTH_ISSUER:-}
+      PKM_MCP_OAUTH_JWKS_URL: ${PKM_MCP_OAUTH_JWKS_URL:-}
+      PKM_MCP_OAUTH_AUDIENCE: ${PKM_MCP_OAUTH_AUDIENCE:-}
+      PKM_MCP_RESOURCE_URL: ${PKM_MCP_RESOURCE_URL:-}
+      PKM_MCP_ALLOWED_HOSTS: ${PKM_MCP_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      PKM_MCP_ALLOWED_ORIGINS: ${PKM_MCP_ALLOWED_ORIGINS:-}
+      PKM_MCP_PUBLIC_WEB_URL: ${PKM_MCP_PUBLIC_WEB_URL:-}
+    volumes:
+      - vault:/var/syncthing/vault
+      - server-data:/server-data
+    ports:
+      - "127.0.0.1:${PKM_HTTP_PORT:-3210}:3210"
+      - "127.0.0.1:${PKM_MCP_HTTP_PORT:-3211}:3211"
+    depends_on:
+      vault-prepare:
+        condition: service_completed_successfully
+      syncthing:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cloudflared:
+    profiles: [tunnel]
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      pkm:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  vault:
+  syncthing-config:
+  server-data:

@@ -1,0 +1,17 @@
+.git
+.agents
+.codex
+**/node_modules
+**/dist
+**/dist-*
+**/*.tsbuildinfo
+**/.pkm
+**/*.sqlite*
+fixtures
+coverage
+release
+.env
+.env.*
+deploy/.env
+deploy/data
+docs

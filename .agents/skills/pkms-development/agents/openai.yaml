@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contextory開発"
+  short_description: "Contextoryの実装・検証からDesktop更新・main push／PR作成まで"
+  default_prompt: "$pkms-development を使って、このプロジェクトの開発変更を検証と配布まで完了してください。"
