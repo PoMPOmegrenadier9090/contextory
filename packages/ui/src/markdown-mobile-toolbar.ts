@@ -141,6 +141,7 @@ export const markdownMobileToolbar = [
             bounds.left,
             bounds.top - 8,
             document.activeElement,
+            dom,
           );
           return true;
         },
@@ -245,7 +246,22 @@ export const markdownMobileToolbar = [
     const toolbar = view.dom.querySelector<HTMLElement>(
       ".pkm-markdown-toolbar:popover-open",
     );
-    return toolbar ? { bottom: toolbar.offsetHeight + 40 } : null;
+    if (!toolbar) return null;
+    const viewport = window.visualViewport;
+    const bottom =
+      (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
+    const margin = toolbar.offsetHeight + 40;
+    // Reserve only the part covering this scroller, retaining context in short inputs.
+    return {
+      bottom: Math.max(
+        0,
+        Math.min(
+          margin,
+          view.scrollDOM.getBoundingClientRect().bottom - (bottom - margin),
+          view.scrollDOM.clientHeight / 2,
+        ),
+      ),
+    };
   }),
   EditorView.baseTheme({
     ".cm-panels-top:has(.pkm-markdown-toolbar)": { height: "0", border: "0" },

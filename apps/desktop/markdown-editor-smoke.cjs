@@ -142,7 +142,7 @@ void app
               if (imagePolicy)
                 response.setHeader("Content-Security-Policy", imagePolicy);
               response.end(
-                `<!doctype html><html><body><main id="editor"></main><script type="module">${tableCheck ? 'import "/apps/desktop/node_modules/@mantine/core/styles.css"; import "/apps/desktop/src/renderer.css"; import "/packages/ui/src/compact.css";' : ""}import { ${browserRun} } from "${browserModule}"; globalThis.editorChecks = ${browserRun}(document.getElementById("editor"), ${tableCheck || captureCheck || imageCheck || quickOpenCheck});</script></body></html>`,
+                `<!doctype html><html><body><main id="editor"></main><script type="module">${tableCheck || browserRun === "runMarkdownEditorBrowserChecks" ? 'import "/apps/desktop/node_modules/@mantine/core/styles.css"; import "/apps/desktop/src/renderer.css"; import "/packages/ui/src/compact.css";' : ""}import { ${browserRun} } from "${browserModule}"; globalThis.editorChecks = ${browserRun}(document.getElementById("editor"), ${tableCheck || captureCheck || imageCheck || quickOpenCheck});</script></body></html>`,
               );
             });
           },

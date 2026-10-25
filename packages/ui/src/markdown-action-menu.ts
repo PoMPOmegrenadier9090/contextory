@@ -8,6 +8,8 @@ import {
   tableRowCells,
 } from "./markdown-table-editing.js";
 
+let closeActionMenu: (() => void) | undefined;
+
 const block = (view: EditorView, text: string, caret: number) => {
   const selection = view.state.selection.main;
   const before = view.state.doc.sliceString(0, selection.from);
@@ -41,18 +43,39 @@ export const openMarkdownActionMenu = (
   x: number,
   y: number,
   target?: Element | null,
+  anchor?: HTMLElement,
 ) => {
   if (view.state.readOnly || view.composing) return;
-  document.querySelector(".pkm-markdown-action-menu")?.remove();
+  closeActionMenu?.();
   const menu = document.createElement("div");
   menu.className = "pkm-markdown-action-menu";
+  menu.popover = "manual";
   menu.setAttribute("role", "menu");
   menu.setAttribute("aria-label", "Markdown操作");
+  const viewport = window.visualViewport;
+  const position = () => {
+    const left = (viewport?.offsetLeft ?? 0) + 8;
+    const top = (viewport?.offsetTop ?? 0) + 8;
+    const right = left + (viewport?.width ?? window.innerWidth) - 16;
+    const bottom = Math.min(
+      top + (viewport?.height ?? window.innerHeight) - 16,
+      anchor ? anchor.getBoundingClientRect().top - 8 : Infinity,
+    );
+    menu.style.maxHeight = `${Math.max(0, Math.min(560, bottom - top))}px`;
+    menu.style.maxWidth = `${right - left}px`;
+    menu.style.left = `${Math.max(left, Math.min(anchor?.getBoundingClientRect().left ?? x, right - menu.offsetWidth))}px`;
+    menu.style.top = `${Math.max(top, Math.min(anchor ? bottom : y, bottom - menu.offsetHeight))}px`;
+  };
   const close = () => {
+    closeActionMenu = undefined;
     menu.remove();
+    viewport?.removeEventListener("resize", position);
+    viewport?.removeEventListener("scroll", position);
+    window.removeEventListener("resize", position);
     document.removeEventListener("pointerdown", outside, true);
     document.removeEventListener("keydown", escape, true);
   };
+  closeActionMenu = close;
   const outside = (event: PointerEvent) => {
     if (!menu.contains(event.target as Node)) close();
   };
@@ -71,6 +94,9 @@ export const openMarkdownActionMenu = (
       view.focus();
     });
   };
+  // Keep the software keyboard and native editor selection during touch commands.
+  if (anchor)
+    menu.addEventListener("pointerdown", (event) => event.preventDefault());
   const separator = () => menu.appendChild(document.createElement("hr"));
   const inline = (label: string, format: "bold" | "italic" | "strike") =>
     item(label, () => toggleInlineFormat(format)(view));
@@ -186,10 +212,16 @@ export const openMarkdownActionMenu = (
     );
     item("表を削除", () => change(() => ""));
   }
-  document.body.append(menu);
-  menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8))}px`;
+  view.dom.append(menu);
+  menu.showPopover();
+  position();
+  viewport?.addEventListener("resize", position);
+  viewport?.addEventListener("scroll", position);
+  window.addEventListener("resize", position);
   document.addEventListener("pointerdown", outside, true);
   document.addEventListener("keydown", escape, true);
-  menu.querySelector<HTMLButtonElement>("button")?.focus();
+  if (!anchor)
+    menu
+      .querySelector<HTMLButtonElement>("button")
+      ?.focus({ preventScroll: true });
 };

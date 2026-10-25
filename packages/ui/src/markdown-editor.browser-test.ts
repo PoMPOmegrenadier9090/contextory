@@ -469,13 +469,15 @@ export const runMarkdownEditorBrowserChecks = async (
     // Quick Capture can clip its contents and use a transformed modal ancestor.
     const dialog = document.body.appendChild(document.createElement("dialog"));
     dialog.style.cssText =
-      "width:280px;height:160px;overflow:auto;transform:translateY(-40px)";
+      "width:280px;height:160px;margin:8px auto;overflow:auto;transform:translateY(0)";
     dialog.showModal();
     const modalEditor = createMarkdownBodyEditor({
       parent: dialog,
       document: "メモ",
     });
     try {
+      modalEditor.view.dom.style.height = "128px";
+      modalEditor.view.scrollDOM.style.overflow = "auto";
       modalEditor.view.focus();
       await settleToolbar();
       const modalToolbar = dialog.querySelector<HTMLElement>(
@@ -500,6 +502,69 @@ export const runMarkdownEditorBrowserChecks = async (
       equal(getComputedStyle(modalToolbar).opacity, "0");
       await stopScrolling();
       equal(getComputedStyle(modalToolbar).opacity, "1");
+      // A short scroller above the keyboard must retain the preceding lines.
+      for (let line = 0; line < 6; line++) {
+        modalEditor.view.dispatch({
+          ...modalEditor.view.state.replaceSelection("\n追加入力"),
+          scrollIntoView: true,
+          userEvent: "input.type",
+        });
+        await stopScrolling();
+        const caret = modalEditor.view.coordsAtPos(
+          modalEditor.view.state.selection.main.head,
+        )!;
+        const scroller = modalEditor.view.scrollDOM.getBoundingClientRect();
+        if (line >= 3)
+          equal(caret.top > scroller.top + scroller.height / 2, true);
+        else equal(modalEditor.view.scrollDOM.scrollTop <= 1, true);
+        equal(caret.bottom <= scroller.bottom, true);
+      }
+      const menuSelection = modalEditor.view.state.selection;
+      try {
+        Object.defineProperty(viewport, "height", {
+          configurable: true,
+          value: 360,
+        });
+        viewport.dispatchEvent(new Event("resize"));
+        await stopScrolling();
+        modalToolbar
+          .querySelector<HTMLButtonElement>('[aria-label="その他の操作"]')!
+          .click();
+        const menu = document.querySelector<HTMLElement>(
+          ".pkm-markdown-action-menu",
+        )!;
+        equal(menu.matches(":popover-open"), true);
+        equal(document.activeElement, modalEditor.view.contentDOM);
+        equal(modalEditor.view.state.selection.eq(menuSelection), true);
+        const menuRect = menu.getBoundingClientRect();
+        equal(menuRect.top >= 8, true);
+        equal(
+          menuRect.bottom <= modalToolbar.getBoundingClientRect().top - 8,
+          true,
+        );
+        equal(menu.scrollHeight > menu.clientHeight, true);
+        menu.scrollTop = menu.scrollHeight;
+        await settleToolbar();
+        const lastItem =
+          menu.querySelector<HTMLButtonElement>("button:last-child")!;
+        const lastRect = lastItem.getBoundingClientRect();
+        equal(
+          lastRect.top >= menuRect.top && lastRect.bottom <= menuRect.bottom,
+          true,
+        );
+        equal(
+          document.elementFromPoint(lastRect.left + 10, lastRect.top + 10),
+          lastItem,
+        );
+        lastItem.click();
+        equal(modalEditor.view.state.doc.toString().includes("$$"), true);
+        equal(document.querySelector(".pkm-markdown-action-menu"), null);
+      } finally {
+        const descriptor = descriptors[0];
+        if (descriptor) Object.defineProperty(viewport, "height", descriptor);
+        else Reflect.deleteProperty(viewport, "height");
+        viewport.dispatchEvent(new Event("resize"));
+      }
       dialog.appendChild(document.createElement("input")).focus();
       await settleToolbar();
       equal(modalToolbar.matches(":popover-open"), false);
