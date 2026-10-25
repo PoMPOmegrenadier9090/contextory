@@ -19,6 +19,8 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { StateEffect } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 
 import {
   buildDirectReferenceCompletionOptions,
@@ -538,6 +540,11 @@ export const QuickCaptureComposer = ({
         <MarkdownLiveEditor
           onReady={(editor) => {
             bodyEditor.current = editor;
+            editor?.view.dispatch({
+              effects: StateEffect.appendConfig.of(
+                EditorView.contentAttributes.of({ "data-autofocus": "" }),
+              ),
+            });
           }}
           ariaLabel="Quick Capture本文エディタ"
           className={`quick-capture-body-editor${compact ? " compact" : ""}`}
@@ -785,12 +792,7 @@ export const QuickCaptureDialog = ({
       centered={!mobile}
       keepMounted
     >
-      <div
-        ref={content}
-        className="quick-capture-dialog-content"
-        tabIndex={mobile ? -1 : undefined}
-        data-autofocus={mobile || undefined}
-      >
+      <div ref={content} className="quick-capture-dialog-content">
         <QuickCaptureComposer
           key={storageKey}
           onCapture={onCapture}

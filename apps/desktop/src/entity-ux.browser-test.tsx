@@ -562,6 +562,11 @@ updated_at: 2026-10-18T00:00:00Z
       );
     const captureEditor = () =>
       document.querySelector<HTMLElement>('[role="dialog"] .cm-content');
+    const captureFocusTargets: EventTarget[] = [];
+    const recordCaptureFocus = (event: FocusEvent) => {
+      if (event.target) captureFocusTargets.push(event.target);
+    };
+    document.addEventListener("focusin", recordCaptureFocus);
     renderCapture(first);
     await waitFor(
       () =>
@@ -574,6 +579,14 @@ updated_at: 2026-10-18T00:00:00Z
       true,
     );
     await new Promise((resolve) => setTimeout(resolve, 300));
+    document.removeEventListener("focusin", recordCaptureFocus);
+    equal(captureEditor()!.hasAttribute("data-autofocus"), true);
+    equal(
+      captureFocusTargets.includes(
+        document.querySelector(".quick-capture-dialog-content")!,
+      ),
+      false,
+    );
     equal(document.activeElement === captureEditor(), true);
     const captureBox = document
       .querySelector(".quick-capture-dialog")!
