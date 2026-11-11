@@ -21,6 +21,7 @@ import {
   getBlocks,
   inheritedContext,
   newObject,
+  plainText,
   refToken,
   removeContext,
   setBlocks,
@@ -167,7 +168,8 @@ const seedState = (): DemoState => {
       {
         id: "d-2",
         kind: "p",
-        text: `${refToken("task-input")} の続きを考える。ここは言及しているだけで、所属は変わらない。`,
+        createdAt: now - 30 * MINUTE,
+        text: `${refToken("task-input")} の続きを考える。@で触れた段落は、所属を変えずに参照先のTimelineへ出る。`,
       },
       {
         id: "d-3",
@@ -538,34 +540,39 @@ const TextBlockView = ({
 
 const ContextChips = ({
   object,
+  implied = [],
 }: {
   readonly object: DocObject;
+  /** 置かれた場所から自明なContext。埋め込みでは表示を省く。 */
+  readonly implied?: readonly string[];
 }): React.JSX.Element => {
   const store = useStore();
   const { objects } = store.state;
   return (
     <span className="od-contexts">
-      {object.contexts.map((id) => (
-        <span
-          className="od-context-chip"
-          key={id}
-          data-type={objects[id]?.type}
-        >
-          <button type="button" onClick={() => store.open(id)}>
-            <small>{TYPE_LABEL[objects[id]?.type ?? "memo"]}</small>
-            {displayTitle(objects[id], objects)}
-          </button>
-          <button
-            type="button"
-            aria-label={`${displayTitle(objects[id], objects)}のContextを外す`}
-            onClick={() =>
-              store.update((state) => removeContext(state, object.id, id))
-            }
+      {object.contexts
+        .filter((id) => !implied.includes(id))
+        .map((id) => (
+          <span
+            className="od-context-chip"
+            key={id}
+            data-type={objects[id]?.type}
           >
-            ×
-          </button>
-        </span>
-      ))}
+            <button type="button" onClick={() => store.open(id)}>
+              <small>{TYPE_LABEL[objects[id]?.type ?? "memo"]}</small>
+              {displayTitle(objects[id], objects)}
+            </button>
+            <button
+              type="button"
+              aria-label={`${displayTitle(objects[id], objects)}のContextを外す`}
+              onClick={() =>
+                store.update((state) => removeContext(state, object.id, id))
+              }
+            >
+              ×
+            </button>
+          </span>
+        ))}
       <button
         className="od-add-context"
         type="button"
@@ -645,39 +652,43 @@ const EmbedView = ({
     store.update((state) =>
       setBlocks(state, hostId, (blocks) =>
         blocks.flatMap<Block>((b) =>
-          b.id === block.id ? [b, { id, kind: "p", text: "" }] : [b],
+          b.id === block.id
+            ? [b, { id, kind: "p", text: "", createdAt: Date.now() }]
+            : [b],
         ),
       ),
     );
   };
+
+  const { objects } = store.state;
+  const done = object.status === "完了";
+  const hasBody = object.body.some((b) => b.kind === "embed" || b.text);
 
   return (
     <section
       className="od-object"
       data-type={object.type}
       data-collapsed={block.collapsed}
+      data-done={done}
     >
       <header>
-        <button
-          className="od-collapse"
-          type="button"
-          aria-expanded={!block.collapsed}
-          aria-label={block.collapsed ? "本文を展開" : "本文を畳む"}
-          onClick={() =>
-            store.update((state) =>
-              setBlocks(state, hostId, (blocks) =>
-                blocks.map((b) =>
-                  b.id === block.id
-                    ? { ...block, collapsed: !block.collapsed }
-                    : b,
-                ),
-              ),
-            )
-          }
-        >
-          {block.collapsed ? "▸" : "▾"}
-        </button>
-        <span className="od-type">{TYPE_LABEL[object.type]}</span>
+        {object.type === "task" ? (
+          <input
+            className="od-check"
+            type="checkbox"
+            checked={done}
+            aria-label={`${object.title}を完了にする`}
+            onChange={() =>
+              store.update((state) =>
+                updateObject(state, object.id, {
+                  status: done ? "未着手" : "完了",
+                }),
+              )
+            }
+          />
+        ) : (
+          <span className="od-type">{TYPE_LABEL[object.type]}</span>
+        )}
         {object.type === "memo" ? (
           <span className="od-memo-time">{formatTime(object.createdAt)}</span>
         ) : (
@@ -692,17 +703,49 @@ const EmbedView = ({
                 updateObject(state, object.id, { title }),
               );
             }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                return;
+              event.preventDefault();
+              exit();
+            }}
           />
         )}
-        <TaskStatusButton object={object} />
-        <ContextChips object={object} />
-        <button
-          className="od-open"
-          type="button"
-          onClick={() => store.open(object.id)}
-        >
-          開く ↗
-        </button>
+        {object.status === "進行中" ? (
+          <TaskStatusButton object={object} />
+        ) : null}
+        <ContextChips
+          object={object}
+          implied={inheritedContext(objects, hostId).contexts}
+        />
+        <span className="od-object-actions">
+          <button
+            type="button"
+            data-has-body={hasBody}
+            aria-expanded={!block.collapsed}
+            aria-label={block.collapsed ? "本文を展開" : "本文を畳む"}
+            onClick={() =>
+              store.update((state) =>
+                setBlocks(state, hostId, (blocks) =>
+                  blocks.map((b) =>
+                    b.id === block.id
+                      ? { ...block, collapsed: !block.collapsed }
+                      : b,
+                  ),
+                ),
+              )
+            }
+          >
+            {block.collapsed ? (hasBody ? "本文 ▸" : "▸") : "▾"}
+          </button>
+          <button
+            type="button"
+            aria-label={`${displayTitle(object, objects)}を開く`}
+            onClick={() => store.open(object.id)}
+          >
+            ↗
+          </button>
+        </span>
       </header>
       {block.collapsed ? null : (
         <BlockList
@@ -758,7 +801,7 @@ const BlockList = ({
             store.update((state) =>
               setBlocks(state, hostId, (bs) => [
                 ...bs,
-                { id, kind: "p", text: "" },
+                { id, kind: "p", text: "", createdAt: Date.now() },
               ]),
             );
           }}
@@ -805,7 +848,7 @@ const ObjectRow = ({
   );
 };
 
-type TimelineFilter = "all" | "task" | "memo" | "decision";
+type TimelineFilter = "all" | "task" | "memo" | "decision" | "mention";
 
 const ObjectPage = ({
   object,
@@ -815,10 +858,48 @@ const ObjectPage = ({
   const store = useStore();
   const { objects } = store.state;
   const [filter, setFilter] = useState<TimelineFilter>("all");
-  const timeline = collectTimeline(objects, object.id).filter(
-    (entry) => filter === "all" || entry.object.type === filter,
-  );
-  const mentions = collectMentions(store.state, object.id);
+  const viaNote = (via: readonly string[]): string =>
+    via.length
+      ? `via ${via.map((id) => displayTitle(objects[id], objects)).join(" › ")}`
+      : "";
+  // Contextで属するObjectと、@で言及しただけの段落を一つの時系列に並べる。
+  const timeline = [
+    ...collectTimeline(objects, object.id)
+      .filter((entry) => filter === "all" || entry.object.type === filter)
+      .map((entry) => ({
+        time: entry.object.createdAt,
+        row: (
+          <ObjectRow
+            key={entry.object.id}
+            object={entry.object}
+            note={viaNote(entry.via) || "直接"}
+          />
+        ),
+      })),
+    ...collectMentions(store.state, object.id)
+      .filter(() => filter === "all" || filter === "mention")
+      .map(({ hostId, block, via }) => {
+        const host = hostId === null ? undefined : objects[hostId];
+        const time = block.createdAt ?? host?.createdAt ?? Date.now();
+        return {
+          time,
+          row: (
+            <li className="od-row" data-type="mention" key={block.id}>
+              <span className="od-type">言及</span>
+              <button type="button" onClick={() => store.open(hostId)}>
+                <strong>{plainText(block.text, objects)}</strong>
+                <small>
+                  {[host ? displayTitle(host, objects) : "Daily", viaNote(via)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </small>
+              </button>
+              <time>{formatTime(time)}</time>
+            </li>
+          ),
+        };
+      }),
+  ].sort((a, b) => b.time - a.time);
 
   return (
     <>
@@ -858,7 +939,9 @@ const ObjectPage = ({
         <header>
           <div>
             <h2>Timeline</h2>
-            <p>Contextを辿って{displayTitle(object, objects)}に届く記録</p>
+            <p>
+              Contextで属する記録と、@で言及した段落。配下のObjectの分も集める
+            </p>
           </div>
           <div className="od-segmented" aria-label="Timeline filter">
             {(
@@ -867,6 +950,7 @@ const ObjectPage = ({
                 ["task", "Task"],
                 ["memo", "Memo"],
                 ["decision", "Decision"],
+                ["mention", "言及"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -881,50 +965,11 @@ const ObjectPage = ({
           </div>
         </header>
         {timeline.length ? (
-          <ul className="od-rows">
-            {timeline.map(({ object: entry, via }) => (
-              <ObjectRow
-                key={entry.id}
-                object={entry}
-                note={
-                  via.length
-                    ? `via ${via.map((id) => displayTitle(objects[id], objects)).join(" › ")}`
-                    : "直接"
-                }
-              />
-            ))}
-          </ul>
+          <ul className="od-rows">{timeline.map((entry) => entry.row)}</ul>
         ) : (
           <p className="od-empty">まだありません。</p>
         )}
       </section>
-
-      {mentions.length ? (
-        <section className="od-panel">
-          <header>
-            <div>
-              <h2>言及</h2>
-              <p>
-                本文で参照しているが、Contextとしては紐づいていない場所も含む
-              </p>
-            </div>
-          </header>
-          <ul className="od-rows">
-            {mentions.map((id) =>
-              id === null ? (
-                <li className="od-row" key="daily">
-                  <span className="od-type">Daily</span>
-                  <button type="button" onClick={() => store.open(null)}>
-                    <strong>今日のDaily</strong>
-                  </button>
-                </li>
-              ) : objects[id] ? (
-                <ObjectRow key={id} object={objects[id]} />
-              ) : null,
-            )}
-          </ul>
-        </section>
-      ) : null}
     </>
   );
 };
@@ -947,8 +992,8 @@ const DailyPage = (): React.JSX.Element => {
           }).format(new Date())}
         </h1>
         <p className="od-page-lead">
-          自由に書く。紐づけたい段落だけ、⋮⋮メニューか @…⌘Enter
-          でMemoにしてContextを付ける。
+          自由に書く。@で触れた段落は参照先のTimelineに出る。まとまった記録は
+          ⋮⋮メニューからMemoにしてContextを付ける。
         </p>
       </header>
       <section className="od-document" aria-label="Daily本文">
@@ -1074,7 +1119,9 @@ const Popup = ({
         <p className="od-popup-empty">候補がありません</p>
       )}
       {popup.kind === "at" ? (
-        <p className="od-popup-help">Enter 参照 · ⌘Enter 参照＋Context付与</p>
+        <p className="od-popup-help">
+          Enter 参照（段落がTimelineに出る） · ⌘Enter Contextも付与
+        </p>
       ) : null}
     </div>
   );
@@ -1235,10 +1282,15 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     );
   };
 
-  const convert = (hostId: HostId, blockId: string, type: ObjectType): void => {
+  const convert = (
+    hostId: HostId,
+    blockId: string,
+    type: ObjectType,
+    /** 入力中の変換なら、Objectの次の行で書き続けられるようにする。 */
+    continueAfter: boolean,
+  ): void => {
     const objectId = newId(type);
-    const bodyBlockId = newId("b");
-    const inherited = inheritedContext(state.objects, hostId);
+    const afterId = newId("b");
     setState((s) => {
       const next = convertBlockToObject(
         s,
@@ -1246,32 +1298,25 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
         blockId,
         type,
         objectId,
-        bodyBlockId,
+        newId("b"),
         Date.now(),
       );
-      // 文書の末尾がObjectなら、続けて書ける段落を足す。
-      return getBlocks(next, hostId).at(-1)?.kind === "embed"
+      const blocks = getBlocks(next, hostId);
+      const index = blocks.findIndex(
+        (b) => b.kind === "embed" && b.objectId === objectId,
+      );
+      if (index < 0) return next;
+      return (continueAfter && type !== "memo") || index === blocks.length - 1
         ? setBlocks(next, hostId, (bs) => [
-            ...bs,
-            { id: newId("b"), kind: "p", text: "" },
+            ...bs.slice(0, index + 1),
+            { id: afterId, kind: "p", text: "", createdAt: Date.now() },
+            ...bs.slice(index + 1),
           ])
         : next;
     });
-    pendingFocus.current = {
-      blockId: type === "memo" ? blockId : bodyBlockId,
-      at: "end",
-    };
-    store.notify({
-      message: `${TYPE_LABEL[type]}にしました · Context: ${contextLabel(inherited.contexts)}${inherited.contexts.length ? "（作成位置から継承）" : ""}`,
-      ...(inherited.contexts.length
-        ? {
-            undo: () =>
-              setState((s) =>
-                updateObject(s, objectId, { contexts: [], derivedFrom: null }),
-              ),
-          }
-        : {}),
-    });
+    if (type === "memo") pendingFocus.current = { blockId, at: "end" };
+    else if (continueAfter)
+      pendingFocus.current = { blockId: afterId, at: "start" };
   };
 
   const searchObjects = (
@@ -1321,7 +1366,12 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                 addObject(
                   s,
                   newObject(id, type, popup.query, Date.now(), inherited, [
-                    { id: newId("b"), kind: "p", text: "" },
+                    {
+                      id: newId("b"),
+                      kind: "p",
+                      text: "",
+                      createdAt: Date.now(),
+                    },
                   ]),
                 ),
               );
@@ -1360,7 +1410,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
           run: () => {
             setPopupState(null);
             replaceTrigger(popup, null);
-            convert(popup.hostId, popup.blockId, type);
+            convert(popup.hostId, popup.blockId, type, true);
           },
         }),
       );
@@ -1396,7 +1446,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
           label: `${TYPE_LABEL[type]}にする`,
           run: () => {
             setPopupState(null);
-            convert(popup.hostId, popup.blockId, type);
+            convert(popup.hostId, popup.blockId, type, false);
           },
         })),
         {

@@ -272,13 +272,16 @@ BlockとObject ContainerをDBでどのように表すかは未決である。Sch
 同じブランチの`?demo=object-document`では、ObjectをBlock範囲で包むのではなく、**独立した本文を持つObjectを文書へ埋め込みBlockとして置く**方式を試している。次の操作を確認できる。
 
 - 本文中で`@`を入力し、既存Objectを検索して参照チップを置く。該当がなければTask、Project、Decisionをその場で作る
-- `@`の候補を⌘Enterで確定し、参照と同時にContextを付ける
+- `@`で言及した段落は、所属を変えずに参照先のTimelineへ「言及」として出る。配下のObjectへの言及も、経路付きで上位のProjectやAreaに集まる
 - 行内で`#`を入力するか⋮⋮メニューから、1 BlockをTask、Decision、Memoへ変える
-- Projectの本文で作ったObjectはそのProjectを、Memo内で作ったObjectはMemoのContextを継承する。継承した値はToastから外せる
-- Dailyの素の段落へContextを付けると、その段落をMemoにしてから紐づける
-- 埋め込みObjectの末尾の空行でEnterを押すと、Objectの外へ出る
+- 埋め込んだTaskはチェックボックス付きの1行、DecisionはラベルとTitleの1行で表示する。本文は必要な時だけ開き、Context追加や「開く」はHover・Focus時だけ出す
+- Projectの本文で作ったObjectはそのProjectを、Memo内で作ったObjectはMemoのContextを継承する。置いた場所から自明なContextは、埋め込み上では表示を省く
+- まとまった記録は⋮⋮メニューからMemoにしてContextを付ける。`@`の候補を⌘Enterで確定しても同じことができる
+- TaskのTitleでEnterを押すか、埋め込みObjectの末尾の空行でEnterを押すと、Objectの外へ出る
 - 参照チップから「開く」「この下に埋め込む」「Contextとして紐づける」を選ぶ
-- Project、AreaのTimelineで、Context連鎖を推移的に辿ったObjectを経路付きで表示する。本文の参照は「言及」として分けて表示する
+- Project、AreaのTimelineで、Contextで属するObjectと言及した段落を一つの時系列に並べる
+
+この試作から、MemoはQuick Captureで追加する記録の単位とし、Dailyの本文では段落をMemoにしなくても`@`だけで関連先へ集まる、という役割分担を想定している。
 
 複数Blockの取り込み、Objectの解除、Quick Capture、DB保存は未実装である。
 

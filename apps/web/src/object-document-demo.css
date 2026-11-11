@@ -75,6 +75,10 @@
   --od-type: var(--od-memo);
   --od-type-soft: var(--od-memo-soft);
 }
+.od-demo [data-type="mention"] {
+  --od-type: var(--od-muted);
+  --od-type-soft: var(--od-subtle);
+}
 .od-demo [data-type="project"],
 .od-demo [data-type="area"] {
   --od-type: var(--od-project);
@@ -347,63 +351,114 @@
   text-decoration: line-through;
 }
 
-/* embedded object */
+/* embedded object: 普段は本文の1行として見せ、開いた時だけ本文を出す */
 .od-object {
-  margin: 6px 0 6px 28px;
-  padding: 6px 10px 8px 0;
-  background: color-mix(in srgb, var(--od-type-soft) 45%, var(--od-surface));
-  border: 1px solid color-mix(in srgb, var(--od-type) 22%, var(--od-line));
-  border-left: 4px solid var(--od-type);
-  border-radius: 8px;
-}
-
-.od-object:focus-within {
-  border-color: color-mix(in srgb, var(--od-type) 55%, var(--od-line));
-  border-left-color: var(--od-type);
-}
-
-.od-object .od-object {
-  margin-left: 28px;
+  margin: 1px 0 1px 28px;
+  border-radius: 6px;
 }
 
 .od-object > header {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 8px;
+  gap: 4px 8px;
   align-items: center;
-  padding: 2px 0 4px 6px;
+  min-height: 30px;
+  padding: 0 4px;
+  border-radius: 6px;
+}
+
+.od-object > header:hover,
+.od-object > header:focus-within {
+  background: color-mix(in srgb, var(--od-type-soft) 60%, transparent);
 }
 
 .od-object > header .od-type {
   align-self: center;
 }
 
-.od-collapse {
-  width: 22px;
-  padding: 0;
+.od-object > .od-blocks {
+  margin: 0 0 4px 9px;
+  border-left: 2px solid color-mix(in srgb, var(--od-type) 35%, transparent);
+}
+
+.od-object[data-type="memo"] {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  background: color-mix(in srgb, var(--od-type-soft) 45%, var(--od-surface));
+  border-left: 3px solid var(--od-type);
+}
+
+.od-object[data-type="memo"] > .od-blocks {
+  margin-left: 0;
+  border-left: 0;
+}
+
+.od-check {
+  width: 16px;
+  height: 16px;
+  margin: 0 2px;
+  accent-color: var(--od-task);
+  cursor: pointer;
+}
+
+.od-object[data-done="true"] .od-title-input {
   color: var(--od-muted);
+  text-decoration: line-through;
+}
+
+.od-object-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.od-object-actions button {
+  padding: 2px 6px;
+  color: var(--od-muted);
+  font-size: 12px;
   background: none;
   border: 0;
+  border-radius: 5px;
+}
+
+.od-object-actions button:hover {
+  color: var(--od-ink);
+  background: var(--od-surface);
+}
+
+/* 操作はhover・focus時だけ出す。本文があることだけは常に示す。 */
+.od-object > header .od-add-context,
+.od-object-actions button:not([data-has-body="true"]) {
+  opacity: 0;
+}
+
+.od-object > header:hover .od-add-context,
+.od-object > header:focus-within .od-add-context,
+.od-object > header:hover .od-object-actions button,
+.od-object > header:focus-within .od-object-actions button {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .od-object > header .od-add-context,
+  .od-object-actions button:not([data-has-body="true"]) {
+    opacity: 1;
+  }
 }
 
 .od-demo .od-title-input {
-  flex: 1 1 160px;
-  min-width: 120px;
+  flex: 0 1 auto;
+  min-width: 80px;
+  max-width: 100%;
+  field-sizing: content;
   padding: 2px 4px;
-  font-weight: 650;
+  line-height: 1.7;
   background: none;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  border: 0;
   outline: none;
 }
 
-.od-title-input:hover,
-.od-title-input:focus {
-  border-color: var(--od-line);
-}
-
 .od-memo-time {
-  flex: 1;
   color: var(--od-muted);
   font-size: 12px;
 }
@@ -464,7 +519,6 @@
 
 .od-add-context,
 .od-derived,
-.od-open,
 .od-append {
   padding: 2px 8px;
   color: var(--od-muted);
@@ -476,11 +530,6 @@
 
 .od-derived {
   border-style: solid;
-}
-
-.od-open {
-  margin-left: auto;
-  border: 0;
 }
 
 .od-append {
@@ -743,8 +792,7 @@
     opacity: 1;
   }
 
-  .od-object,
-  .od-object .od-object {
+  .od-object {
     margin-left: 12px;
   }
 

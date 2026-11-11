@@ -3,7 +3,12 @@ export type TaskStatus = "未着手" | "進行中" | "完了";
 export type TextKind = "p" | "h" | "li";
 
 export type Block =
-  | { readonly id: string; readonly kind: TextKind; readonly text: string }
+  | {
+      readonly id: string;
+      readonly kind: TextKind;
+      readonly text: string;
+      readonly createdAt?: number;
+    }
   | {
       readonly id: string;
       readonly kind: "embed";
@@ -185,7 +190,13 @@ export const convertBlockToObject = (
   return setBlocks(addObject(state, object), hostId, (blocks) =>
     blocks.map<Block>((b) =>
       b.id === blockId
-        ? { id: `embed-${objectId}`, kind: "embed", objectId, collapsed: false }
+        ? {
+            id: `embed-${objectId}`,
+            kind: "embed",
+            objectId,
+            // TaskやDecisionは1行で本文に馴染ませ、本文は必要な時だけ開く。
+            collapsed: type !== "memo",
+          }
         : b,
     ),
   );
@@ -281,18 +292,40 @@ export const collectTimeline = (
     })
     .sort((a, b) => b.object.createdAt - a.object.createdAt);
 
-/** 本文中で参照しているが、Contextとしては紐づいていない場所も含む言及元。 */
+export interface MentionEntry {
+  readonly hostId: HostId;
+  readonly block: TextBlock;
+  /** 言及先からtargetまでの経路。target自身への言及なら空。 */
+  readonly via: readonly string[];
+}
+
+/**
+ * targetやその配下のObjectへ@で言及している段落。所属は変えず、段落だけを集める。
+ * target自身の本文と、すでにContextで届くObjectの本文は重複するので除く。
+ */
 export const collectMentions = (
   state: DemoState,
   targetId: string,
-): readonly HostId[] => {
-  const mentions = (blocks: readonly Block[]): boolean =>
-    blocks.some(
-      (block) =>
-        block.kind !== "embed" && block.text.includes(refToken(targetId)),
-    );
-  const sources: HostId[] = Object.values(state.objects)
-    .filter((object) => object.id !== targetId && mentions(object.body))
-    .map((object) => object.id);
-  return mentions(state.daily) ? [null, ...sources] : sources;
+): readonly MentionEntry[] => {
+  const reach = (id: string): readonly string[] | null => {
+    if (id === targetId) return [];
+    const path = contextPath(state.objects, id, targetId);
+    return path && [id, ...path];
+  };
+  const hosts: (readonly [HostId, readonly Block[]])[] = [
+    [null, state.daily],
+    ...Object.values(state.objects)
+      .filter((object) => !reach(object.id))
+      .map((object) => [object.id, object.body] as const),
+  ];
+  return hosts.flatMap(([hostId, blocks]) =>
+    blocks.flatMap((block) => {
+      if (block.kind === "embed") return [];
+      for (const part of splitRefs(block.text)) {
+        const via = "ref" in part ? reach(part.ref) : null;
+        if (via) return [{ hostId, block, via }];
+      }
+      return [];
+    }),
+  );
 };

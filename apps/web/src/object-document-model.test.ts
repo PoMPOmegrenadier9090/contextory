@@ -59,7 +59,13 @@ describe("object document model", () => {
   });
 
   it("keeps references separate from contexts", () => {
-    expect(collectMentions(state, "task")).toEqual([null]);
+    expect(collectMentions(state, "task")).toMatchObject([
+      { hostId: null, block: { id: "d1" }, via: [] },
+    ]);
+    // 配下のTaskへの言及は、経路付きでProjectにも集まる。
+    expect(collectMentions(state, "project")).toMatchObject([
+      { hostId: null, block: { id: "d1" }, via: ["task"] },
+    ]);
     expect(
       collectTimeline(state.objects, "task").map((e) => e.object.id),
     ).toEqual(["sub"]);
@@ -81,7 +87,7 @@ describe("object document model", () => {
       derivedFrom: "memo",
     });
     expect(next.objects.memo?.body).toEqual([
-      { id: "embed-new", kind: "embed", objectId: "new", collapsed: false },
+      { id: "embed-new", kind: "embed", objectId: "new", collapsed: true },
     ]);
   });
 
