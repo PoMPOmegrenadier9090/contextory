@@ -7,16 +7,17 @@
 
 ## 責務と依存方向
 
-| 場所                    | 責務                                                          | 主な入口                                                            |
-| ----------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `packages/contracts`    | Entity、Todo、アプリ操作の入出力・イベント型、共有限度値      | `entity.ts`、`todo.ts`、`application.ts`                            |
-| `packages/core`         | Markdown/YAMLの解析・検証・保存表現、メタデータ編集、入力検証 | `markdown-parser.ts`、`entity-metadata.ts`、`request-validation.ts` |
-| `packages/storage-node` | Vaultファイル、SQLite索引、draft、watcher、Syncthing          | `openLocalVault` / `LocalVaultService`                              |
-| `packages/mcp`          | Agent tool登録、専用HTTP認証、stdio bridge、host lifecycle    | `tools.ts`、`http-host.ts`、`bridge-main.ts`                        |
-| `packages/ui`           | 共通ビュー、エディタ、画面からの編集操作、端末ローカルUI設定  | `entity-actions.ts`、`markdown-live-editor.tsx`                     |
-| `apps/server`           | HTTP/SSEとCLI、Webの静的ファイル配信                          | `http-api.ts`、`cli.ts`                                             |
-| `apps/web`              | HTTP clientとWeb画面の状態・遷移・保存通知                    | `api-client.ts`、`web-app.tsx`                                      |
-| `apps/desktop`          | Electron main/preload/IPC、Vault選択とDesktop画面             | `vault-controller.ts`、`electron-ipc.ts`、`desktop-app.tsx`         |
+| 場所                    | 責務                                                               | 主な入口                                                            |
+| ----------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `packages/contracts`    | Entity、Todo、アプリ操作の入出力・イベント型、共有限度値           | `entity.ts`、`todo.ts`、`application.ts`                            |
+| `packages/core`         | Markdown/YAMLの解析・検証・保存表現、メタデータ編集、入力検証      | `markdown-parser.ts`、`entity-metadata.ts`、`request-validation.ts` |
+| `packages/storage-node` | Vaultファイル、SQLite索引、draft、watcher、Syncthing               | `openLocalVault` / `LocalVaultService`                              |
+| `packages/mcp`          | Agent tool登録、専用HTTP認証、stdio bridge、host lifecycle         | `tools.ts`、`http-host.ts`、`bridge-main.ts`                        |
+| `packages/editor`       | 次期のObject文書エディタ（試作）。文書木の分解・復元とTiptapのNode | `object-editor.tsx`、`workspace-model.ts`                           |
+| `packages/ui`           | 共通ビュー、エディタ、画面からの編集操作、端末ローカルUI設定       | `entity-actions.ts`、`markdown-live-editor.tsx`                     |
+| `apps/server`           | HTTP/SSEとCLI、Webの静的ファイル配信                               | `http-api.ts`、`cli.ts`                                             |
+| `apps/web`              | HTTP clientとWeb画面の状態・遷移・保存通知                         | `api-client.ts`、`web-app.tsx`                                      |
+| `apps/desktop`          | Electron main/preload/IPC、Vault選択とDesktop画面                  | `vault-controller.ts`、`electron-ipc.ts`、`desktop-app.tsx`         |
 
 ```mermaid
 flowchart BT

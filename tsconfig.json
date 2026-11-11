@@ -17,6 +17,9 @@
       "path": "./packages/ui"
     },
     {
+      "path": "./packages/editor"
+    },
+    {
       "path": "./apps/desktop"
     },
     {

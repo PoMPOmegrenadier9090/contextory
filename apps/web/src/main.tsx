@@ -6,11 +6,10 @@ import { createRoot } from "react-dom/client";
 import { createHttpPkmClient } from "./api-client.js";
 import { ObjectDocumentDemo } from "./object-document-demo.js";
 import { ObjectModelDemo } from "./object-model-demo.js";
-import { TiptapSpikeDemo } from "./tiptap-spike-demo.js";
 import { WebApp } from "./web-app.js";
 import "./object-document-demo.css";
 import "./object-model-demo.css";
-import "./tiptap-spike-demo.css";
+import "../../../packages/editor/src/editor.css";
 import "./web.css";
 import "../../../packages/ui/src/compact.css";
 
@@ -23,8 +22,6 @@ createRoot(root).render(
     <AppearanceProvider>
       {demo === "object-document" ? (
         <ObjectDocumentDemo />
-      ) : demo === "tiptap-spike" ? (
-        <TiptapSpikeDemo />
       ) : demo === "object-model" ? (
         <ObjectModelDemo />
       ) : (

@@ -1,0 +1,449 @@
+/* ObjectEditorの見た目。色は --pe-* を上書きして合わせる。 */
+.pe-editor,
+.pe-menu {
+  --pe-surface: #fffefa;
+  --pe-subtle: #f8f6f1;
+  --pe-muted: #6f716c;
+  --pe-line: #ddd9cf;
+  --pe-task: #41657a;
+  --pe-decision: #956b2d;
+  --pe-memo: #6b5a86;
+  --pe-project: #416b5a;
+}
+
+[data-mantine-color-scheme="dark"] .pe-editor,
+[data-mantine-color-scheme="dark"] .pe-menu {
+  --pe-surface: #20231f;
+  --pe-subtle: #282b26;
+  --pe-muted: #a7aaa2;
+  --pe-line: #3b4039;
+  --pe-task: #91b6c7;
+  --pe-decision: #d8b57b;
+  --pe-memo: #b9a8d6;
+  --pe-project: #8db6a4;
+}
+
+.pe-editor .tiptap {
+  min-height: 120px;
+  line-height: 1.7;
+  outline: none;
+}
+
+.pe-editor .tiptap p {
+  margin: 0;
+  padding: 3px 0;
+}
+
+.pe-editor .tiptap h1,
+.pe-editor .tiptap h2,
+.pe-editor .tiptap h3 {
+  margin: 12px 0 4px;
+  font-size: 19px;
+}
+
+.pe-editor .tiptap ul,
+.pe-editor .tiptap ol {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.pe-chip {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 6px;
+  color: var(--pe-type, var(--pe-project));
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: color-mix(
+    in srgb,
+    var(--pe-type, var(--pe-project)) 14%,
+    transparent
+  );
+  border-radius: 5px;
+}
+
+.pe-chip::before {
+  content: "@";
+  opacity: 0.55;
+}
+
+.pe-editor [data-type="task"] {
+  --pe-type: var(--pe-task);
+}
+
+.pe-editor [data-type="decision"] {
+  --pe-type: var(--pe-decision);
+}
+
+.pe-editor [data-type="memo"] {
+  --pe-type: var(--pe-memo);
+}
+
+.pe-editor [data-type="project"],
+.pe-editor [data-type="area"] {
+  --pe-type: var(--pe-project);
+}
+
+.pe-editor [data-type="missing"] {
+  --pe-type: var(--pe-muted);
+  text-decoration: line-through;
+}
+
+.pe-chip {
+  cursor: pointer;
+}
+
+.pe-editor .ProseMirror-selectednode > .pe-chip,
+.pe-chip.ProseMirror-selectednode {
+  outline: 2px solid var(--pe-type, var(--pe-project));
+}
+
+/* object block: 1行目はTitle、開いた時だけ本文を出す */
+.pe-object {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: start;
+  border-radius: 6px;
+}
+
+.pe-object:hover {
+  background: color-mix(in srgb, var(--pe-type) 6%, transparent);
+}
+
+.pe-object-lead {
+  display: flex;
+  align-items: center;
+  height: 31px;
+  user-select: none;
+}
+
+.pe-object-lead input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--pe-task);
+}
+
+.pe-object[data-type="decision"] {
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+}
+
+.pe-object[data-type="memo"] {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--pe-type) 7%, transparent);
+  border-left: 3px solid var(--pe-type);
+}
+
+.pe-object[data-type="memo"] > .pe-object-lead {
+  padding-left: 6px;
+}
+
+.pe-badge {
+  padding: 1px 6px;
+  color: var(--pe-type);
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--pe-type) 14%, transparent);
+  border-radius: 5px;
+}
+
+.pe-object [data-object-title] {
+  padding: 3px 0;
+}
+
+.pe-object[data-done="true"] > .pe-object-content > [data-object-title],
+.pe-object[data-done="true"] > .pe-object-content > div > [data-object-title] {
+  color: var(--pe-muted);
+  text-decoration: line-through;
+}
+
+.pe-object[data-collapsed="true"] [data-object-title] ~ * {
+  display: none;
+}
+
+.pe-object [data-object-title] ~ * {
+  margin-left: -17px;
+  padding-left: 15px;
+  border-left: 2px solid color-mix(in srgb, var(--pe-type) 30%, transparent);
+}
+
+.pe-object-side {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  height: 31px;
+  user-select: none;
+}
+
+.pe-context {
+  max-width: 160px;
+  padding: 1px 8px;
+  overflow: hidden;
+  color: var(--pe-type);
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--pe-surface);
+  border: 1px solid var(--pe-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.pe-object-action {
+  padding: 2px 6px;
+  color: var(--pe-muted);
+  font: inherit;
+  font-size: 12px;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* 操作はhover・focus時だけ出す。本文があることだけは常に示す。 */
+.pe-object:hover > .pe-object-side > .pe-object-action,
+.pe-object:focus-within > .pe-object-side > .pe-object-action,
+.pe-object-action[data-has-body="true"] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .pe-object-action {
+    opacity: 1;
+  }
+}
+
+.pe-menu {
+  --pe-surface: #fffefa;
+  --pe-subtle: #f8f6f1;
+  --pe-muted: #6f716c;
+  --pe-line: #ddd9cf;
+  --pe-task: #41657a;
+  --pe-decision: #956b2d;
+  --pe-memo: #6b5a86;
+  --pe-project: #416b5a;
+}
+
+[data-mantine-color-scheme="dark"] .pe-editor,
+[data-mantine-color-scheme="dark"] .pe-menu {
+  --pe-surface: #20231f;
+  --pe-subtle: #282b26;
+  --pe-muted: #a7aaa2;
+  --pe-line: #3b4039;
+  --pe-task: #91b6c7;
+  --pe-decision: #d8b57b;
+  --pe-memo: #b9a8d6;
+  --pe-project: #8db6a4;
+}
+
+.pe-editor .tiptap {
+  min-height: 120px;
+  line-height: 1.7;
+  outline: none;
+}
+
+.pe-editor .tiptap p {
+  margin: 0;
+  padding: 3px 0;
+}
+
+.pe-editor .tiptap h1,
+.pe-editor .tiptap h2,
+.pe-editor .tiptap h3 {
+  margin: 12px 0 4px;
+  font-size: 19px;
+}
+
+.pe-editor .tiptap ul,
+.pe-editor .tiptap ol {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.pe-chip {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 6px;
+  color: var(--pe-type, var(--pe-project));
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: color-mix(
+    in srgb,
+    var(--pe-type, var(--pe-project)) 14%,
+    transparent
+  );
+  border-radius: 5px;
+}
+
+.pe-chip::before {
+  content: "@";
+  opacity: 0.55;
+}
+
+.pe-editor [data-type="task"] {
+  --pe-type: var(--pe-task);
+}
+
+.pe-editor [data-type="decision"] {
+  --pe-type: var(--pe-decision);
+}
+
+.pe-editor [data-type="memo"] {
+  --pe-type: var(--pe-memo);
+}
+
+.pe-editor [data-type="project"],
+.pe-editor [data-type="area"] {
+  --pe-type: var(--pe-project);
+}
+
+.pe-editor [data-type="missing"] {
+  --pe-type: var(--pe-muted);
+  text-decoration: line-through;
+}
+
+.pe-chip {
+  cursor: pointer;
+}
+
+.pe-editor .ProseMirror-selectednode > .pe-chip,
+.pe-chip.ProseMirror-selectednode {
+  outline: 2px solid var(--pe-type, var(--pe-project));
+}
+
+/* object block: 1行目はTitle、開いた時だけ本文を出す */
+.pe-object {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: start;
+  border-radius: 6px;
+}
+
+.pe-object:hover {
+  background: color-mix(in srgb, var(--pe-type) 6%, transparent);
+}
+
+.pe-object-lead {
+  display: flex;
+  align-items: center;
+  height: 31px;
+  user-select: none;
+}
+
+.pe-object-lead input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--pe-task);
+}
+
+.pe-object[data-type="decision"] {
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+}
+
+.pe-object[data-type="memo"] {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--pe-type) 7%, transparent);
+  border-left: 3px solid var(--pe-type);
+}
+
+.pe-object[data-type="memo"] > .pe-object-lead {
+  padding-left: 6px;
+}
+
+.pe-badge {
+  padding: 1px 6px;
+  color: var(--pe-type);
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--pe-type) 14%, transparent);
+  border-radius: 5px;
+}
+
+.pe-object [data-object-title] {
+  padding: 3px 0;
+}
+
+.pe-object[data-done="true"] > .pe-object-content > [data-object-title],
+.pe-object[data-done="true"] > .pe-object-content > div > [data-object-title] {
+  color: var(--pe-muted);
+  text-decoration: line-through;
+}
+
+.pe-object[data-collapsed="true"] [data-object-title] ~ * {
+  display: none;
+}
+
+.pe-object [data-object-title] ~ * {
+  margin-left: -17px;
+  padding-left: 15px;
+  border-left: 2px solid color-mix(in srgb, var(--pe-type) 30%, transparent);
+}
+
+.pe-object-action {
+  height: 31px;
+  padding: 0 6px;
+  color: var(--pe-muted);
+  font: inherit;
+  font-size: 12px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.pe-object:hover > .pe-object-action,
+.pe-object:focus-within > .pe-object-action,
+.pe-object-action[data-has-body="true"] {
+  opacity: 1;
+}
+
+.pe-menu {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  background: var(--pe-surface);
+  border: 1px solid var(--pe-line);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 16%);
+}
+
+.pe-menu p {
+  margin: 2px 8px 4px;
+  color: var(--pe-muted);
+  font-size: 11px;
+}
+
+.pe-menu button {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pe-menu button[aria-selected="true"] {
+  background: var(--pe-subtle);
+}
+
+.pe-menu button span {
+  color: var(--pe-muted);
+  font-size: 11px;
+  font-weight: 700;
+}

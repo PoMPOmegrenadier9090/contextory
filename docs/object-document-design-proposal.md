@@ -267,39 +267,7 @@ BlockとObject ContainerをDBでどのように表すかは未決である。Sch
 
 このPrototype（`?demo=object-model`）には、Block Editor、文書内のObject化、明示的なObject Containerは含まれていない。
 
-### 文書中心のPrototype
-
-同じブランチの`?demo=object-document`では、ObjectをBlock範囲で包むのではなく、**独立した本文を持つObjectを文書へ埋め込みBlockとして置く**方式を試している。次の操作を確認できる。
-
-- 本文中で`@`を入力し、既存Objectを検索して参照チップを置く。該当がなければTask、Project、Decisionをその場で作る
-- `@`で言及した段落は、所属を変えずに参照先のTimelineへ「言及」として出る。配下のObjectへの言及も、経路付きで上位のProjectやAreaに集まる
-- 行内で`#`を入力するか⋮⋮メニューから、1 BlockをTask、Decision、Memoへ変える
-- 埋め込んだTaskはチェックボックス付きの1行、DecisionはラベルとTitleの1行で表示する。本文は必要な時だけ開き、Context追加や「開く」はHover・Focus時だけ出す
-- Projectの本文で作ったObjectはそのProjectを、Memo内で作ったObjectはMemoのContextを継承する。置いた場所から自明なContextは、埋め込み上では表示を省く
-- まとまった記録は⋮⋮メニューからMemoにしてContextを付ける。`@`の候補を⌘Enterで確定しても同じことができる
-- TaskのTitleでEnterを押すか、埋め込みObjectの末尾の空行でEnterを押すと、Objectの外へ出る
-- 参照チップから「開く」「この下に埋め込む」「Contextとして紐づける」を選ぶ
-- Project、AreaのTimelineで、Contextで属するObjectと言及した段落を一つの時系列に並べる
-
-この試作から、MemoはQuick Captureで追加する記録の単位とし、Dailyの本文では段落をMemoにしなくても`@`だけで関連先へ集まる、という役割分担を想定している。
-
-複数Blockの取り込み、Objectの解除、Quick Capture、DB保存は未実装である。
-
-### Tiptapでの技術検証（Phase 0）
-
-入力体験を自作せず、Tiptap 3（ProseMirror、MIT）を土台にする方針を`?demo=tiptap-spike`で検証している。Objectは入れ子の別エディタにせず、Titleと本文を持つコンテナNodeとして同じ文書木に置く。保存時にObject単位へ分け、読み込み時に戻す。
-
-ブラウザ操作で次の点を確認した。
-
-- `@`の候補メニューから既存Objectの参照と新規作成ができる
-- `#`で段落をTaskやDecisionへ変え、次の行で書き続けられる
-- TitleでのEnter、本文末尾の空行でのEnterでObjectの外へ出る。Title先頭のBackspaceでObjectを解除する
-- 段落から入れ子のTaskへまたがる選択を削除でき、Undoで元に戻る
-- 文書内のTaskのTitleを編集すると、同じ文書の参照チップが追従する
-- 文書木をObject単位へ分解し、元の文書木へ復元できる
-- `@`を含む最小の構造（段落、リスト項目、見出し、Object）を、言及が届く単位として取り出せる
-
-日本語IMEでの変換中の挙動と、モバイルSafariの実機での挙動は未確認である。
+文書中心のPrototypeとTiptapでの技術検証の経過は、[2026-11-12の記録](discussions/20261112_object-editor-prototype.md)にまとめている。
 
 ## 未決事項
 

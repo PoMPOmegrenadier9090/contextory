@@ -13,6 +13,9 @@
     },
     {
       "path": "../../packages/ui"
+    },
+    {
+      "path": "../../packages/editor"
     }
   ],
   "include": ["src/**/*.ts", "src/**/*.tsx"]
