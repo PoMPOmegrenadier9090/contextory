@@ -9,6 +9,11 @@
     "@pkm/contracts": "workspace:*",
     "@pkm/core": "workspace:*",
     "@pkm/ui": "workspace:*",
+    "@tiptap/extension-unique-id": "3.33.1",
+    "@tiptap/pm": "3.33.1",
+    "@tiptap/react": "3.33.1",
+    "@tiptap/starter-kit": "3.33.1",
+    "@tiptap/suggestion": "3.33.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

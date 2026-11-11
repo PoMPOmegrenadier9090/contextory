@@ -285,6 +285,22 @@ BlockとObject ContainerをDBでどのように表すかは未決である。Sch
 
 複数Blockの取り込み、Objectの解除、Quick Capture、DB保存は未実装である。
 
+### Tiptapでの技術検証（Phase 0）
+
+入力体験を自作せず、Tiptap 3（ProseMirror、MIT）を土台にする方針を`?demo=tiptap-spike`で検証している。Objectは入れ子の別エディタにせず、Titleと本文を持つコンテナNodeとして同じ文書木に置く。保存時にObject単位へ分け、読み込み時に戻す。
+
+ブラウザ操作で次の点を確認した。
+
+- `@`の候補メニューから既存Objectの参照と新規作成ができる
+- `#`で段落をTaskやDecisionへ変え、次の行で書き続けられる
+- TitleでのEnter、本文末尾の空行でのEnterでObjectの外へ出る。Title先頭のBackspaceでObjectを解除する
+- 段落から入れ子のTaskへまたがる選択を削除でき、Undoで元に戻る
+- 文書内のTaskのTitleを編集すると、同じ文書の参照チップが追従する
+- 文書木をObject単位へ分解し、元の文書木へ復元できる
+- `@`を含む最小の構造（段落、リスト項目、見出し、Object）を、言及が届く単位として取り出せる
+
+日本語IMEでの変換中の挙動と、モバイルSafariの実機での挙動は未確認である。
+
 ## 未決事項
 
 - Object化するBlock範囲と、編集後も境界を安定させる方法
