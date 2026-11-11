@@ -1,6 +1,6 @@
 # Contextory 設計ドキュメント案内
 
-更新日: 2026-10-24
+更新日: 2026-11-11
 
 現行仕様は以下の文書に集約する。実装済み機能と未実装の計画を同じ契約として扱わない。
 
@@ -20,7 +20,11 @@
 | Vault初期化・Docker・Web公開          | [Vault・同期環境セットアップ](server-setup.md)                  |
 | 同期peer登録・除外規則・競合試験      | [Syncthingセットアップ](syncthing-setup.md)                     |
 | 開発時の検証・配布                    | [PKMS開発スキル](../.agents/skills/pkms-development/SKILL.md)   |
-| 開発起動・検証・CLI・配布物の生成     | [開発・運用ガイド](development.md)                            |
+| 開発起動・検証・CLI・配布物の生成     | [開発・運用ガイド](development.md)                              |
+
+## 検討中の再設計案
+
+[自由文書とObjectを両立する入力・表示設計案](object-document-design-proposal.md)に、BlockのObject化、明示的なObject Container、View、Quick Capture、Daily、Context継承の案をまとめている。これは次期設計のたたき台であり、現在設計 v3や現行実装の仕様を置き換えるものではない。
 
 ## 文書の使い分け
 
