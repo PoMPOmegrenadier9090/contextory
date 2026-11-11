@@ -499,3 +499,13 @@
   appearance: none;
   cursor: pointer;
 }
+
+.od-save-status {
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
+.od-save-status[data-error="true"] {
+  color: #b3261e;
+  font-weight: 700;
+}

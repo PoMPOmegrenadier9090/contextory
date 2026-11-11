@@ -27,10 +27,10 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { newId, type DocNode } from "./document-model.js";
-import type { ObjectType } from "./workspace-model.js";
+import { newId, type DocNode, type ObjectType } from "@pkm/core";
 
-export interface ObjectSummary {
+/** エディタが表示に使うObjectの情報。 */
+export interface EditorObject {
   readonly id: string;
   readonly type: ObjectType;
   readonly title: string;
@@ -38,8 +38,8 @@ export interface ObjectSummary {
 
 /** エディタが外側（Objectの保存先）へ頼む操作。 */
 export interface EditorHost {
-  readonly lookup: (id: string) => ObjectSummary | undefined;
-  readonly search: (query: string) => readonly ObjectSummary[];
+  readonly lookup: (id: string) => EditorObject | undefined;
+  readonly search: (query: string) => Promise<readonly EditorObject[]>;
   /** 文書に置かないObjectを作る。parentIdは入力位置を包むObject。 */
   readonly create: (
     type: ObjectType,
@@ -51,7 +51,7 @@ export interface EditorHost {
   readonly contexts: (
     id: string,
     parentId: string | null,
-  ) => readonly ObjectSummary[];
+  ) => readonly EditorObject[];
 }
 
 export const TYPE_LABEL: Record<ObjectType, string> = {
@@ -324,8 +324,11 @@ const insertRef = (editor: Editor, range: Range, objectId: string): void => {
     .run();
 };
 
-const atItems = (host: EditorHost, query: string): MenuItem[] => [
-  ...host.search(query).map<MenuItem>((info) => ({
+const atItems = async (
+  host: EditorHost,
+  query: string,
+): Promise<MenuItem[]> => [
+  ...(await host.search(query)).map<MenuItem>((info) => ({
     key: info.id,
     badge: TYPE_LABEL[info.type],
     label: info.title,

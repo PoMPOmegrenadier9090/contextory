@@ -148,3 +148,9 @@ export type { AgentEntityDto, AgentSnapshot } from "./agent-vault-service.js";
 export { AgentOperationStore } from "./agent-operation-store.js";
 
 export { createLinkPreviewLoader } from "./link-preview.js";
+export {
+  OBJECT_STORE_SCHEMA_VERSION,
+  ObjectStore,
+  ObjectStoreError,
+} from "./object-store.js";
+export type { ObjectWorkspace } from "./object-store.js";

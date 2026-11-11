@@ -147,3 +147,26 @@ export {
 export type { AgentCommand } from "./agent-contract.js";
 
 export { entityQueryAffected } from "./entity-query-impact.js";
+export {
+  collectMentionUnits,
+  embeddedIds,
+  joinDocument,
+  newId,
+  refIds,
+  splitDocument,
+  timeFromId,
+} from "./object-document.js";
+export type {
+  DocNode,
+  MentionUnit,
+  ObjectContent,
+  SplitResult,
+} from "./object-document.js";
+export { inheritedContexts, inlineText, OBJECT_TYPES } from "./object-model.js";
+export type {
+  ObjectPage,
+  ObjectRecord,
+  ObjectSummary,
+  ObjectTimelineEntry,
+  ObjectType,
+} from "./object-model.js";

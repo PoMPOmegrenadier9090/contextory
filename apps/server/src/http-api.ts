@@ -1,6 +1,6 @@
 import { openMcpHost } from "@pkm/mcp";
 import type { McpHostOptions } from "@pkm/mcp";
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import type { EntityPageQuery, PkmVaultChangeEvent } from "@pkm/contracts";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -46,9 +46,12 @@ import {
   parseSaveEntityRequest,
   parsePermanentlyDeleteEntityRequest,
 } from "@pkm/core";
+import { registerObjectRoutes } from "./object-api.js";
 import {
   createLinkPreviewLoader,
   LocalVaultError,
+  ObjectStore,
+  ObjectStoreError,
   openLocalVault,
   type LocalVaultService,
   type OpenLocalVaultOptions,
@@ -464,6 +467,8 @@ const registerRoutes = (
 const statusForError = (error: Error): number => {
   if (error instanceof TypeError) return 400;
   if ("code" in error && error.code === "ENOENT") return 404;
+  if (error instanceof ObjectStoreError)
+    return error.code === "OBJECT_NOT_FOUND" ? 404 : 409;
   if (error instanceof LocalVaultError) {
     return error.code === "ENTITY_NOT_FOUND" ||
       error.code === "CONFLICT_NOT_FOUND"
@@ -511,6 +516,8 @@ export interface OpenServerAppOptions extends BuildServerAppOptions {
   readonly mcp?: McpHostOptions;
   readonly vault?: OpenLocalVaultOptions;
   readonly webRoot?: string;
+  /** 次期Object保存層のDB。省略時はVaultの.pkm配下に置く。 */
+  readonly objectStorePath?: string;
 }
 
 export const openServerApp = async (
@@ -522,6 +529,10 @@ export const openServerApp = async (
     localDrafts: false,
   });
   const app = buildServerApp(service, options);
+  const objects = new ObjectStore(
+    options.objectStorePath ?? join(vaultRoot, ".pkm", "objects.sqlite"),
+  );
+  registerObjectRoutes(app, objects);
   const webRoot = options.webRoot;
   if (webRoot !== undefined) {
     await app.register(fastifyStatic, {
@@ -545,11 +556,13 @@ export const openServerApp = async (
   } catch (error) {
     await app.close();
     await service.close();
+    objects.close();
     throw error;
   }
   app.addHook("onClose", async () => {
     await mcp?.close();
     await service.close();
+    objects.close();
   });
   return app;
 };
