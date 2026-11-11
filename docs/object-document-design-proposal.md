@@ -265,7 +265,22 @@ BlockとObject ContainerをDBでどのように表すかは未決である。Sch
 - DecisionをTask階層と分けて表示する
 - 関連MemoをProject本文とは別に表示する
 
-Prototypeには、Block Editor、文書内のObject化、明示的なObject Containerは含まれていない。Quick CaptureのContext候補、Dailyの再構成View、DB保存も未実装である。現在のPrototypeはViewからのObject作成を確認するもので、次期設計全体を表してはいない。
+このPrototype（`?demo=object-model`）には、Block Editor、文書内のObject化、明示的なObject Containerは含まれていない。
+
+### 文書中心のPrototype
+
+同じブランチの`?demo=object-document`では、ObjectをBlock範囲で包むのではなく、**独立した本文を持つObjectを文書へ埋め込みBlockとして置く**方式を試している。次の操作を確認できる。
+
+- 本文中で`@`を入力し、既存Objectを検索して参照チップを置く。該当がなければTask、Project、Decisionをその場で作る
+- `@`の候補を⌘Enterで確定し、参照と同時にContextを付ける
+- 行内で`#`を入力するか⋮⋮メニューから、1 BlockをTask、Decision、Memoへ変える
+- Projectの本文で作ったObjectはそのProjectを、Memo内で作ったObjectはMemoのContextを継承する。継承した値はToastから外せる
+- Dailyの素の段落へContextを付けると、その段落をMemoにしてから紐づける
+- 埋め込みObjectの末尾の空行でEnterを押すと、Objectの外へ出る
+- 参照チップから「開く」「この下に埋め込む」「Contextとして紐づける」を選ぶ
+- Project、AreaのTimelineで、Context連鎖を推移的に辿ったObjectを経路付きで表示する。本文の参照は「言及」として分けて表示する
+
+複数Blockの取り込み、Objectの解除、Quick Capture、DB保存は未実装である。
 
 ## 未決事項
 
