@@ -579,3 +579,8 @@
 .od-add-field {
   margin-top: 8px;
 }
+
+.od-type-option {
+  display: inline-flex;
+  margin: 0 0 16px;
+}

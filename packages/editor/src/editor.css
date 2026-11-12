@@ -128,16 +128,12 @@
   outline: 2px solid var(--pe-type, var(--pe-project));
 }
 
-/* object block: 1行目はTitle、開いた時だけ本文を出す */
+/* object block: 行頭に開閉と「開く」、1行目はTitle、開いた時だけFieldと本文を出す */
 .pe-object {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 6px;
-}
-
-.pe-object[data-type="task"] {
-  grid-template-columns: 26px minmax(0, 1fr) auto;
 }
 
 .pe-object:hover {
@@ -146,23 +142,70 @@
 
 .pe-object[data-type="memo"] {
   margin: 4px 0;
-  padding-left: 8px;
   background: color-mix(in srgb, var(--pe-type) 7%, transparent);
-  border-left: 3px solid var(--pe-type);
 }
 
 .pe-object-lead {
   display: flex;
+  gap: 2px;
   align-items: center;
   height: 31px;
+  margin-right: 8px;
   user-select: none;
 }
 
 .pe-object-lead input {
   width: 16px;
   height: 16px;
-  margin: 0;
-  accent-color: var(--pe-task);
+  margin: 0 0 0 4px;
+  accent-color: var(--pe-type);
+}
+
+.pe-toggle {
+  width: 16px;
+  padding: 0;
+  color: var(--pe-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* 開閉はhover・focus時と、開いている間だけ見せる。 */
+.pe-object:hover > .pe-object-lead > .pe-toggle,
+.pe-object:focus-within > .pe-object-lead > .pe-toggle,
+.pe-toggle[aria-expanded="true"] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .pe-toggle {
+    opacity: 1;
+  }
+}
+
+/* 行頭の点。押すとObjectを開く。畳んだ中身があれば輪を付ける。 */
+.pe-bullet {
+  box-sizing: content-box;
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  background: var(--pe-type);
+  background-clip: content-box;
+  border: 4px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.pe-bullet[data-has-body="true"] {
+  border-color: color-mix(in srgb, var(--pe-type) 28%, transparent);
+}
+
+.pe-bullet:hover {
+  border-color: color-mix(in srgb, var(--pe-type) 50%, transparent);
 }
 
 .pe-object [data-object-title] {
@@ -183,28 +226,15 @@
   content: var(--pe-tag);
 }
 
-.pe-object[data-type="task"] > .pe-object-content [data-object-title]::after {
-  display: none;
-}
-
 .pe-object[data-done="true"] > .pe-object-content > [data-object-title],
 .pe-object[data-done="true"] > .pe-object-content > div > [data-object-title] {
   color: var(--pe-muted);
   text-decoration: line-through;
 }
 
+/* Fieldと本文は、Titleの文字と同じ左端に揃う。 */
 .pe-object[data-collapsed="true"] [data-object-title] ~ * {
   display: none;
-}
-
-.pe-object [data-object-title] ~ * {
-  padding-left: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--pe-type) 30%, transparent);
-}
-
-.pe-object[data-type="task"] [data-object-title] ~ * {
-  margin-left: -17px;
-  padding-left: 15px;
 }
 
 /* Fieldの行。名前は属性から出し、値だけを編集できる。 */
@@ -245,31 +275,6 @@
   border: 1px solid var(--pe-line);
   border-radius: 999px;
   cursor: pointer;
-}
-
-.pe-object-action {
-  padding: 2px 6px;
-  color: var(--pe-muted);
-  font: inherit;
-  font-size: 12px;
-  background: none;
-  border: 0;
-  border-radius: 5px;
-  cursor: pointer;
-  opacity: 0;
-}
-
-/* 操作はhover・focus時だけ出す。本文があることだけは常に示す。 */
-.pe-object:hover > .pe-object-side > .pe-object-action,
-.pe-object:focus-within > .pe-object-side > .pe-object-action,
-.pe-object-action[data-has-body="true"] {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .pe-object-action {
-    opacity: 1;
-  }
 }
 
 /* @ / # menu */

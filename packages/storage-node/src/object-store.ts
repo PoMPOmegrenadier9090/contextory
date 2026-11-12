@@ -28,7 +28,7 @@ import {
   type TypeDefinition,
 } from "@pkm/core";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 2;
+export const OBJECT_STORE_SCHEMA_VERSION = 3;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
@@ -168,6 +168,14 @@ export class ObjectStore {
         `);
         this.database.pragma("user_version = 2");
       })();
+    if (version < 3)
+      this.database.transaction(() => {
+        this.database.exec(`
+          ALTER TABLE types ADD COLUMN checkbox INTEGER NOT NULL DEFAULT 0;
+          UPDATE types SET checkbox = 1 WHERE name = 'task';
+        `);
+        this.database.pragma("user_version = 3");
+      })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
   }
 
@@ -279,8 +287,10 @@ export class ObjectStore {
 
   private ensureType(name: ObjectType, now: number): void {
     this.database
-      .prepare("INSERT OR IGNORE INTO types (name, created_at) VALUES (?, ?)")
-      .run(name, now);
+      .prepare(
+        "INSERT OR IGNORE INTO types (name, checkbox, created_at) VALUES (?, ?, ?)",
+      )
+      .run(name, name === "task" ? 1 : 0, now);
   }
 
   /** 種別のField。Contextは保存が無くても先頭に持つ。 */
@@ -651,8 +661,10 @@ export class ObjectStore {
   /** 種別の定義。組み込みの種別を先に、ユーザーが作った種別を作成順に並べる。 */
   types(): TypeDefinition[] {
     const rows = this.database
-      .prepare("SELECT name, color FROM types ORDER BY created_at, name")
-      .all() as { name: string; color: string | null }[];
+      .prepare(
+        "SELECT name, color, checkbox FROM types ORDER BY created_at, name",
+      )
+      .all() as { name: string; color: string | null; checkbox: number }[];
     const builtins: readonly string[] = OBJECT_TYPES;
     const order = (name: string): number =>
       builtins.includes(name) ? builtins.indexOf(name) : builtins.length;
@@ -662,6 +674,7 @@ export class ObjectStore {
         name: row.name,
         color: row.color,
         builtin: builtins.includes(row.name),
+        checkbox: row.checkbox === 1,
         fields: this.fieldsOf(row.name),
       }));
   }
@@ -672,6 +685,7 @@ export class ObjectStore {
     patch: {
       readonly name?: string;
       readonly color?: string | null;
+      readonly checkbox?: boolean;
       readonly fields?: readonly FieldDefinition[];
     },
   ): TypeDefinition {
@@ -692,6 +706,10 @@ export class ObjectStore {
           .prepare("UPDATE types SET color = ? WHERE name = ?")
           .run(patch.color, name);
       }
+      if (patch.checkbox !== undefined)
+        this.database
+          .prepare("UPDATE types SET checkbox = ? WHERE name = ?")
+          .run(patch.checkbox ? 1 : 0, name);
       if (patch.fields) {
         const rest = patch.fields.filter((f) => f.id !== CONTEXT_FIELD.id);
         const fields = patch.fields.some((f) => f.id === CONTEXT_FIELD.id)

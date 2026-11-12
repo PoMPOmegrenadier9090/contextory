@@ -234,7 +234,10 @@ describe("ObjectStore", () => {
   it("renames and recolors user-defined types and drops removed fields", () => {
     store.savePage(DAILY, doc(block("mtg", "会議", "定例")), 10);
     const fields = [{ id: "place", name: "場所", kind: "text" as const }];
-    store.updateType("会議", { fields, color: "rose" });
+    expect(store.types().filter((type) => type.checkbox)).toMatchObject([
+      { name: "task" },
+    ]);
+    store.updateType("会議", { fields, color: "rose", checkbox: true });
     store.savePage(
       DAILY,
       doc(block("mtg", "会議", "定例", field("place", text("3F")))),
@@ -245,6 +248,7 @@ describe("ObjectStore", () => {
       name: "meeting",
       color: "rose",
       builtin: false,
+      checkbox: true,
       fields: [{ id: "context" }, { id: "place" }],
     });
     expect(store.objectsOfType("meeting").map((o) => o.id)).toEqual(["mtg"]);

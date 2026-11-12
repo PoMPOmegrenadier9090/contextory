@@ -198,6 +198,7 @@ const TypePage = ({
   readonly onPatch: (patch: {
     name?: string;
     color?: string | null;
+    checkbox?: boolean;
     fields?: readonly FieldDefinition[];
   }) => void;
   readonly row: (object: ObjectSummary) => React.JSX.Element;
@@ -262,6 +263,14 @@ const TypePage = ({
           ))}
         </div>
       </header>
+      <label className="od-status od-type-option">
+        <input
+          type="checkbox"
+          checked={definition.checkbox}
+          onChange={() => onPatch({ checkbox: !definition.checkbox })}
+        />
+        行頭に完了のチェックボックスを出す
+      </label>
       <section className="od-panel">
         <header>
           <div>
@@ -581,6 +590,8 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     },
   };
 
+  const hasCheckbox = (type: ObjectType): boolean =>
+    types.find((definition) => definition.name === type)?.checkbox ?? false;
   const colorOf = (type: ObjectType): string | undefined =>
     types.find((definition) => definition.name === type)?.color ?? undefined;
   const objectRow = (
@@ -598,7 +609,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
         <strong>{object.title}</strong>
         {note ? <small>{note}</small> : null}
       </button>
-      {object.type === "task" ? (
+      {hasCheckbox(object.type) ? (
         <span className="od-row-status" data-done={object.done}>
           {object.done ? "完了" : "未完了"}
         </span>
@@ -741,6 +752,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                   name: typePage.name,
                   color: null,
                   builtin: false,
+                  checkbox: false,
                   fields: [],
                 }
               }
@@ -779,7 +791,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                     }}
                   />
                   <div className="od-page-meta">
-                    {current.type === "task" ? (
+                    {hasCheckbox(current.type) ? (
                       <label className="od-status">
                         <input
                           type="checkbox"

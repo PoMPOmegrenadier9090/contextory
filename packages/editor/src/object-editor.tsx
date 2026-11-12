@@ -1,6 +1,6 @@
 import UniqueID from "@tiptap/extension-unique-id";
 import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
-import { PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import {
   EditorContent,
   Extension,
@@ -237,29 +237,65 @@ const ObjectBlockView = ({
     id,
     pos === undefined ? null : enclosingObjectId(editor, pos),
   );
+  const definition = typeOf(host, type);
+  const checkbox = definition?.checkbox ?? type === "task";
+  const toggle = (): void => {
+    const at = getPos();
+    if (at === undefined) return;
+    if (!collapsed || hasBody) {
+      updateAttributes({ collapsed: !collapsed });
+      return;
+    }
+    // 本文がまだ無ければ、最初の段落を作ってそこへ入る。
+    const end = at + node.nodeSize - 1;
+    editor
+      .chain()
+      .command(({ tr }) => {
+        tr.setNodeAttribute(at, "collapsed", false);
+        tr.insert(end, editor.schema.nodes.paragraph!.create());
+        tr.setSelection(TextSelection.create(tr.doc, end + 1));
+        return true;
+      })
+      .focus()
+      .run();
+  };
   return (
     <NodeViewWrapper
       className="pe-object"
       data-type={type}
-      data-color={typeOf(host, type)?.color ?? undefined}
+      data-color={definition?.color ?? undefined}
       data-collapsed={collapsed}
-      data-done={Boolean(node.attrs.done)}
-      // 種別はTitleの行末にタグとして出す。Taskはチェックボックスが種別を示す。
-      style={{
-        "--pe-tag":
-          type === "task" ? '""' : JSON.stringify(`#${typeLabel(type)}`),
-      }}
+      data-done={checkbox && Boolean(node.attrs.done)}
+      // 種別はTitleの行末にタグとして出す。
+      style={{ "--pe-tag": JSON.stringify(`#${typeLabel(type)}`) }}
     >
-      {type === "task" ? (
-        <span className="pe-object-lead" contentEditable={false}>
+      {/* Tanaと同じく、行頭に開閉と「開く」を置いて、マウスの移動を減らす。 */}
+      <span className="pe-object-lead" contentEditable={false}>
+        <button
+          type="button"
+          className="pe-toggle"
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "展開" : "畳む"}
+          onClick={toggle}
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
+        <button
+          type="button"
+          className="pe-bullet"
+          data-has-body={hasBody}
+          aria-label="開く"
+          onClick={() => host.open(id)}
+        />
+        {checkbox ? (
           <input
             type="checkbox"
             aria-label="完了にする"
             checked={Boolean(node.attrs.done)}
             onChange={() => updateAttributes({ done: !node.attrs.done })}
           />
-        </span>
-      ) : null}
+        ) : null}
+      </span>
       <NodeViewContent className="pe-object-content" />
       <span className="pe-object-side" contentEditable={false}>
         {contexts.map((context) => (
@@ -274,43 +310,6 @@ const ObjectBlockView = ({
             {context.title}
           </button>
         ))}
-        <button
-          type="button"
-          className="pe-object-action"
-          data-has-body={hasBody}
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? "本文を展開" : "本文を畳む"}
-          onClick={() => {
-            const at = getPos();
-            if (at === undefined) return;
-            if (!collapsed || hasBody) {
-              updateAttributes({ collapsed: !collapsed });
-              return;
-            }
-            // 本文がまだ無ければ、最初の段落を作ってそこへ入る。
-            const end = at + node.nodeSize - 1;
-            editor
-              .chain()
-              .command(({ tr }) => {
-                tr.setNodeAttribute(at, "collapsed", false);
-                tr.insert(end, editor.schema.nodes.paragraph!.create());
-                tr.setSelection(TextSelection.create(tr.doc, end + 1));
-                return true;
-              })
-              .focus()
-              .run();
-          }}
-        >
-          {collapsed ? (hasBody ? "本文 ▸" : "▸") : "▾"}
-        </button>
-        <button
-          type="button"
-          className="pe-object-action"
-          aria-label="開く"
-          onClick={() => host.open(id)}
-        >
-          ↗
-        </button>
       </span>
     </NodeViewWrapper>
   );
@@ -393,6 +392,41 @@ const ObjectBlock = Node.create({
       },
     };
   },
+});
+
+/** 畳んだObjectの見えていない行へ、カーソルが入らないようにする。 */
+const CollapsedGuard = Extension.create({
+  name: "collapsedGuard",
+  addProseMirrorPlugins: () => [
+    new Plugin({
+      appendTransaction(_transactions, oldState, newState) {
+        const { $head, head } = newState.selection;
+        for (let depth = 1; depth <= $head.depth; depth++) {
+          const node = $head.node(depth);
+          if (
+            node.type.name !== "objectBlock" ||
+            !node.attrs.collapsed ||
+            $head.index(depth) === 0
+          )
+            continue;
+          const start = $head.before(depth);
+          const end = start + node.nodeSize;
+          const title = TextSelection.create(
+            newState.doc,
+            start + node.firstChild!.nodeSize,
+          );
+          // 進んできた向きへ抜ける。後ろに行ける場所が無ければTitleへ戻す。
+          const after = TextSelection.near(newState.doc.resolve(end), 1);
+          return newState.tr.setSelection(
+            head >= oldState.selection.head && after.head >= end
+              ? after
+              : title,
+          );
+        }
+        return null;
+      },
+    }),
+  ],
 });
 
 /* ---------- @ / # menus ---------- */
@@ -675,6 +709,7 @@ export const ObjectEditor = ({
       ObjectTitle,
       ObjectField,
       ObjectBlock,
+      CollapsedGuard,
       createMenus(bridge, hostRef),
     ],
     content: initialDoc as JSONContent,

@@ -99,6 +99,9 @@ export const registerObjectRoutes = (
       ...(typeof body.color === "string" || body.color === null
         ? { color: body.color }
         : {}),
+      ...(typeof body.checkbox === "boolean"
+        ? { checkbox: body.checkbox }
+        : {}),
       ...(Array.isArray(body.fields)
         ? {
             fields: (body.fields as unknown[]).map((value) => {

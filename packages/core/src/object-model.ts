@@ -51,6 +51,8 @@ export interface TypeDefinition {
   /** TYPE_COLORSのいずれか。nullなら種別の既定の色。 */
   readonly color: string | null;
   readonly builtin: boolean;
+  /** 行頭に完了のチェックボックスを出すか。 */
+  readonly checkbox: boolean;
   /** 表示順。上にあるものほど優先して見せる。 */
   readonly fields: readonly FieldDefinition[];
 }
