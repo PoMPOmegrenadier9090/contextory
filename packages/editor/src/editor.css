@@ -47,27 +47,7 @@
   padding-left: 22px;
 }
 
-.pe-chip {
-  display: inline-block;
-  margin: 0 1px;
-  padding: 0 6px;
-  color: var(--pe-type, var(--pe-project));
-  font-weight: 600;
-  line-height: 1.5;
-  white-space: nowrap;
-  background: color-mix(
-    in srgb,
-    var(--pe-type, var(--pe-project)) 14%,
-    transparent
-  );
-  border-radius: 5px;
-}
-
-.pe-chip::before {
-  content: "@";
-  opacity: 0.55;
-}
-
+/* type colors */
 .pe-editor [data-type="task"] {
   --pe-type: var(--pe-task);
 }
@@ -90,11 +70,29 @@
   text-decoration: line-through;
 }
 
+/* reference chip */
 .pe-chip {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 6px;
+  color: var(--pe-type, var(--pe-project));
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: color-mix(
+    in srgb,
+    var(--pe-type, var(--pe-project)) 14%,
+    transparent
+  );
+  border-radius: 5px;
   cursor: pointer;
 }
 
-.pe-editor .ProseMirror-selectednode > .pe-chip,
+.pe-chip::before {
+  content: "@";
+  opacity: 0.55;
+}
+
 .pe-chip.ProseMirror-selectednode {
   outline: 2px solid var(--pe-type, var(--pe-project));
 }
@@ -102,13 +100,24 @@
 /* object block: 1行目はTitle、開いた時だけ本文を出す */
 .pe-object {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 6px;
 }
 
+.pe-object[data-type="task"] {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+}
+
 .pe-object:hover {
   background: color-mix(in srgb, var(--pe-type) 6%, transparent);
+}
+
+.pe-object[data-type="memo"] {
+  margin: 4px 0;
+  padding-left: 8px;
+  background: color-mix(in srgb, var(--pe-type) 7%, transparent);
+  border-left: 3px solid var(--pe-type);
 }
 
 .pe-object-lead {
@@ -125,32 +134,26 @@
   accent-color: var(--pe-task);
 }
 
-.pe-object[data-type="decision"] {
-  grid-template-columns: 74px minmax(0, 1fr) auto;
-}
-
-.pe-object[data-type="memo"] {
-  grid-template-columns: 56px minmax(0, 1fr) auto;
-  margin: 4px 0;
-  background: color-mix(in srgb, var(--pe-type) 7%, transparent);
-  border-left: 3px solid var(--pe-type);
-}
-
-.pe-object[data-type="memo"] > .pe-object-lead {
-  padding-left: 6px;
-}
-
-.pe-badge {
-  padding: 1px 6px;
-  color: var(--pe-type);
-  font-size: 11px;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--pe-type) 14%, transparent);
-  border-radius: 5px;
-}
-
 .pe-object [data-object-title] {
   padding: 3px 0;
+}
+
+/* 種別は行末のタグで示す。入れ子のObjectは、自分を包む最も内側の値を使う。 */
+.pe-object [data-object-title]::after {
+  margin-left: 8px;
+  padding: 1px 6px;
+  color: var(--pe-type);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  background: color-mix(in srgb, var(--pe-type) 14%, transparent);
+  border-radius: 5px;
+  content: var(--pe-tag);
+}
+
+.pe-object[data-type="task"] > .pe-object-content [data-object-title]::after {
+  display: none;
 }
 
 .pe-object[data-done="true"] > .pe-object-content > [data-object-title],
@@ -164,9 +167,13 @@
 }
 
 .pe-object [data-object-title] ~ * {
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--pe-type) 30%, transparent);
+}
+
+.pe-object[data-type="task"] [data-object-title] ~ * {
   margin-left: -17px;
   padding-left: 15px;
-  border-left: 2px solid color-mix(in srgb, var(--pe-type) 30%, transparent);
 }
 
 .pe-object-side {
@@ -217,193 +224,7 @@
   }
 }
 
-.pe-menu {
-  --pe-surface: #fffefa;
-  --pe-subtle: #f8f6f1;
-  --pe-muted: #6f716c;
-  --pe-line: #ddd9cf;
-  --pe-task: #41657a;
-  --pe-decision: #956b2d;
-  --pe-memo: #6b5a86;
-  --pe-project: #416b5a;
-}
-
-[data-mantine-color-scheme="dark"] .pe-editor,
-[data-mantine-color-scheme="dark"] .pe-menu {
-  --pe-surface: #20231f;
-  --pe-subtle: #282b26;
-  --pe-muted: #a7aaa2;
-  --pe-line: #3b4039;
-  --pe-task: #91b6c7;
-  --pe-decision: #d8b57b;
-  --pe-memo: #b9a8d6;
-  --pe-project: #8db6a4;
-}
-
-.pe-editor .tiptap {
-  min-height: 120px;
-  line-height: 1.7;
-  outline: none;
-}
-
-.pe-editor .tiptap p {
-  margin: 0;
-  padding: 3px 0;
-}
-
-.pe-editor .tiptap h1,
-.pe-editor .tiptap h2,
-.pe-editor .tiptap h3 {
-  margin: 12px 0 4px;
-  font-size: 19px;
-}
-
-.pe-editor .tiptap ul,
-.pe-editor .tiptap ol {
-  margin: 0;
-  padding-left: 22px;
-}
-
-.pe-chip {
-  display: inline-block;
-  margin: 0 1px;
-  padding: 0 6px;
-  color: var(--pe-type, var(--pe-project));
-  font-weight: 600;
-  line-height: 1.5;
-  white-space: nowrap;
-  background: color-mix(
-    in srgb,
-    var(--pe-type, var(--pe-project)) 14%,
-    transparent
-  );
-  border-radius: 5px;
-}
-
-.pe-chip::before {
-  content: "@";
-  opacity: 0.55;
-}
-
-.pe-editor [data-type="task"] {
-  --pe-type: var(--pe-task);
-}
-
-.pe-editor [data-type="decision"] {
-  --pe-type: var(--pe-decision);
-}
-
-.pe-editor [data-type="memo"] {
-  --pe-type: var(--pe-memo);
-}
-
-.pe-editor [data-type="project"],
-.pe-editor [data-type="area"] {
-  --pe-type: var(--pe-project);
-}
-
-.pe-editor [data-type="missing"] {
-  --pe-type: var(--pe-muted);
-  text-decoration: line-through;
-}
-
-.pe-chip {
-  cursor: pointer;
-}
-
-.pe-editor .ProseMirror-selectednode > .pe-chip,
-.pe-chip.ProseMirror-selectednode {
-  outline: 2px solid var(--pe-type, var(--pe-project));
-}
-
-/* object block: 1行目はTitle、開いた時だけ本文を出す */
-.pe-object {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
-  align-items: start;
-  border-radius: 6px;
-}
-
-.pe-object:hover {
-  background: color-mix(in srgb, var(--pe-type) 6%, transparent);
-}
-
-.pe-object-lead {
-  display: flex;
-  align-items: center;
-  height: 31px;
-  user-select: none;
-}
-
-.pe-object-lead input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--pe-task);
-}
-
-.pe-object[data-type="decision"] {
-  grid-template-columns: 74px minmax(0, 1fr) auto;
-}
-
-.pe-object[data-type="memo"] {
-  grid-template-columns: 56px minmax(0, 1fr) auto;
-  margin: 4px 0;
-  background: color-mix(in srgb, var(--pe-type) 7%, transparent);
-  border-left: 3px solid var(--pe-type);
-}
-
-.pe-object[data-type="memo"] > .pe-object-lead {
-  padding-left: 6px;
-}
-
-.pe-badge {
-  padding: 1px 6px;
-  color: var(--pe-type);
-  font-size: 11px;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--pe-type) 14%, transparent);
-  border-radius: 5px;
-}
-
-.pe-object [data-object-title] {
-  padding: 3px 0;
-}
-
-.pe-object[data-done="true"] > .pe-object-content > [data-object-title],
-.pe-object[data-done="true"] > .pe-object-content > div > [data-object-title] {
-  color: var(--pe-muted);
-  text-decoration: line-through;
-}
-
-.pe-object[data-collapsed="true"] [data-object-title] ~ * {
-  display: none;
-}
-
-.pe-object [data-object-title] ~ * {
-  margin-left: -17px;
-  padding-left: 15px;
-  border-left: 2px solid color-mix(in srgb, var(--pe-type) 30%, transparent);
-}
-
-.pe-object-action {
-  height: 31px;
-  padding: 0 6px;
-  color: var(--pe-muted);
-  font: inherit;
-  font-size: 12px;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  opacity: 0;
-}
-
-.pe-object:hover > .pe-object-action,
-.pe-object:focus-within > .pe-object-action,
-.pe-object-action[data-has-body="true"] {
-  opacity: 1;
-}
-
+/* @ / # menu */
 .pe-menu {
   position: fixed;
   z-index: 50;

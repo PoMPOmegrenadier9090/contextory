@@ -141,19 +141,21 @@ const ObjectBlockView = ({
       data-type={type}
       data-collapsed={collapsed}
       data-done={Boolean(node.attrs.done)}
+      // 種別はTitleの行末にタグとして出す。Taskはチェックボックスが種別を示す。
+      style={{
+        "--pe-tag": type === "task" ? '""' : `"#${TYPE_LABEL[type]}"`,
+      }}
     >
-      <span className="pe-object-lead" contentEditable={false}>
-        {type === "task" ? (
+      {type === "task" ? (
+        <span className="pe-object-lead" contentEditable={false}>
           <input
             type="checkbox"
             aria-label="完了にする"
             checked={Boolean(node.attrs.done)}
             onChange={() => updateAttributes({ done: !node.attrs.done })}
           />
-        ) : (
-          <span className="pe-badge">{TYPE_LABEL[type]}</span>
-        )}
-      </span>
+        </span>
+      ) : null}
       <NodeViewContent className="pe-object-content" />
       <span className="pe-object-side" contentEditable={false}>
         {contexts.map((context) => (
@@ -311,7 +313,14 @@ interface MenuBridge {
 }
 
 const CREATABLE: readonly ObjectType[] = ["task", "project", "decision"];
-const CONVERTIBLE: readonly ObjectType[] = ["task", "decision", "memo"];
+/** #で段落から作れる種別。Tanaと同じく、種別を問わずその場で作る。 */
+const CONVERTIBLE: readonly ObjectType[] = [
+  "task",
+  "decision",
+  "memo",
+  "project",
+  "area",
+];
 
 const insertRef = (editor: Editor, range: Range, objectId: string): void => {
   editor
@@ -463,34 +472,46 @@ export const ObjectEditor = ({
 }): React.JSX.Element => {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [active, setActive] = useState(0);
-  const latest = useRef({ menu, active, host, onChange });
-  latest.current = { menu, active, host, onChange };
+  const latest = useRef({ host, onChange });
+  latest.current = { host, onChange };
   const hostRef = useRef(host);
   hostRef.current = host;
+  // キー入力は描画を待たずに届くので、メニューの最新状態はrefにも持つ。
+  const shown = useRef<{ menu: MenuState | null; active: number }>({
+    menu: null,
+    active: 0,
+  });
 
-  const [bridge] = useState<MenuBridge>(() => ({
-    show: (next) => {
-      if (next?.items.length !== latest.current.menu?.items.length)
-        setActive(0);
-      setMenu(next);
-    },
-    key: (event) => {
-      const current = latest.current.menu;
-      if (!current?.items.length || event.isComposing) return false;
-      const count = current.items.length;
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        const delta = event.key === "ArrowDown" ? 1 : -1;
-        setActive((index) => (index + delta + count) % count);
-        return true;
-      }
-      if (event.key === "Enter" || event.key === "Tab") {
-        const item = current.items[Math.min(latest.current.active, count - 1)];
-        if (item) current.pick(item);
-        return true;
-      }
-      return false;
-    },
-  }));
+  const [bridge] = useState<MenuBridge>(() => {
+    const select = (index: number): void => {
+      shown.current.active = index;
+      setActive(index);
+    };
+    return {
+      show: (next) => {
+        if (next?.items.length !== shown.current.menu?.items.length) select(0);
+        shown.current.menu = next;
+        setMenu(next);
+      },
+      key: (event) => {
+        const { menu: current, active: index } = shown.current;
+        if (!current?.items.length || event.isComposing) return false;
+        const count = current.items.length;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          select(
+            (index + (event.key === "ArrowDown" ? 1 : -1) + count) % count,
+          );
+          return true;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          const item = current.items[Math.min(index, count - 1)];
+          if (item) current.pick(item);
+          return true;
+        }
+        return false;
+      },
+    };
+  });
 
   const editor = useEditor({
     extensions: [
@@ -536,7 +557,10 @@ export const ObjectEditor = ({
                 type="button"
                 role="option"
                 aria-selected={i === index}
-                onMouseEnter={() => setActive(i)}
+                onMouseEnter={() => {
+                  shown.current.active = i;
+                  setActive(i);
+                }}
                 onClick={() => menu.pick(item)}
               >
                 <span>{item.badge}</span>
