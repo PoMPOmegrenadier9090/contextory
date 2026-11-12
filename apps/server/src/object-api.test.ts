@@ -93,7 +93,23 @@ describe("object API", () => {
       title: "やること",
       contexts: ["project"],
     });
-    expect(page.doc.content?.[0]).toMatchObject({ type: "objectBlock" });
+    // 先頭はProject自身のField行、その次が埋め込んだTask。
+    expect(page.doc.content?.map((node) => node.type)).toEqual([
+      "objectField",
+      "objectBlock",
+    ]);
+    const patched = await second.inject({
+      method: "PATCH",
+      url: "/api/next/types/task",
+      payload: { fields: [{ id: "due", name: "期限", kind: "text" }] },
+    });
+    expect(patched.json()).toMatchObject({
+      name: "task",
+      fields: [{ id: "context" }, { id: "due", name: "期限" }],
+    });
+    expect(
+      (await second.inject({ url: "/api/next/objects?type=task" })).json(),
+    ).toMatchObject([{ id: "task" }]);
     const timeline = (
       await second.inject({ url: "/api/next/objects/project/timeline" })
     ).json<ObjectTimelineEntry[]>();

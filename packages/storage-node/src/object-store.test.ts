@@ -43,6 +43,23 @@ const record = (
   createdAt,
 });
 
+const field = (fieldId: string, ...content: DocNode[]): DocNode => ({
+  type: "objectField",
+  attrs: { fieldId, name: fieldId },
+  content,
+});
+/** Field行を除いた文書木。 */
+const body = (node: DocNode): DocNode => ({
+  ...node,
+  ...(node.content
+    ? {
+        content: node.content
+          .filter((child) => child.type !== "objectField")
+          .map(body),
+      }
+    : {}),
+});
+
 const DAILY = "daily:2026-11-12";
 
 describe("ObjectStore", () => {
@@ -83,9 +100,9 @@ describe("ObjectStore", () => {
       createdAt: 10,
     });
     expect(page.objects.child?.contexts).toEqual(["new"]);
-    expect(store.loadPage("project").doc).toMatchObject(tree);
+    expect(body(store.loadPage("project").doc)).toMatchObject(tree);
     // 埋め込んだObject自身の画面では、その本文が文書になる。
-    expect(store.loadPage("new").doc.content?.[0]).toMatchObject({
+    expect(body(store.loadPage("new").doc).content?.[0]).toMatchObject({
       type: "objectBlock",
       attrs: { objectId: "child" },
     });
@@ -159,7 +176,87 @@ describe("ObjectStore", () => {
     expect(normalizeObjectType("")).toBeNull();
     const page = store.savePage(DAILY, doc(block("mtg", "会議", "定例")), 10);
     expect(page.objects.mtg?.type).toBe("会議");
-    expect(store.overview(0).types).toEqual(["会議"]);
+    expect(store.types().map((type) => type.name)).toEqual([
+      "area",
+      "project",
+      "task",
+      "decision",
+      "memo",
+      "会議",
+    ]);
+  });
+
+  it("stores field values and treats the context row as the contexts", () => {
+    store.updateType("task", {
+      fields: [{ id: "due", name: "期限", kind: "text" }],
+    });
+    const tree = doc(
+      block(
+        "new",
+        "task",
+        "新規",
+        field("context", ref("area"), ref("new"), ref("missing")),
+        field("due", text("来週")),
+        field("unknown", text("x")),
+      ),
+    );
+    store.savePage("project", tree, 10);
+    // 行があれば置き場所からは継がず、自分自身や存在しない相手は取り込まない。
+    expect(store.getObject("new").contexts).toEqual(["area"]);
+    expect(store.loadPage("project").doc.content).toMatchObject([
+      { type: "objectField", attrs: { fieldId: "context", name: "Context" } },
+      {
+        type: "objectBlock",
+        content: [
+          { type: "objectTitle" },
+          { type: "objectField", content: [ref("area"), text(" ")] },
+          {
+            type: "objectField",
+            attrs: { fieldId: "due", name: "期限" },
+            content: [text("来週")],
+          },
+        ],
+      },
+    ]);
+    // Object自身の画面では、文書の先頭の行がそのObjectのFieldになる。
+    store.savePage(
+      "new",
+      doc(field("context", ref("project")), field("due")),
+      11,
+    );
+    expect(store.getObject("new").contexts).toEqual(["project"]);
+    expect(store.loadPage("new").doc.content?.[1]).toEqual({
+      type: "objectField",
+      attrs: { fieldId: "due", name: "期限" },
+    });
+  });
+
+  it("renames and recolors user-defined types and drops removed fields", () => {
+    store.savePage(DAILY, doc(block("mtg", "会議", "定例")), 10);
+    const fields = [{ id: "place", name: "場所", kind: "text" as const }];
+    store.updateType("会議", { fields, color: "rose" });
+    store.savePage(
+      DAILY,
+      doc(block("mtg", "会議", "定例", field("place", text("3F")))),
+      11,
+    );
+    const renamed = store.updateType("会議", { name: "meeting" });
+    expect(renamed).toMatchObject({
+      name: "meeting",
+      color: "rose",
+      builtin: false,
+      fields: [{ id: "context" }, { id: "place" }],
+    });
+    expect(store.objectsOfType("meeting").map((o) => o.id)).toEqual(["mtg"]);
+    store.updateType("meeting", { fields: [] });
+    expect(
+      store.loadPage(DAILY).doc.content?.[0]?.content?.map((n) => n.type),
+    ).toEqual(["objectTitle", "objectField"]);
+    expect(() => store.updateType("task", { name: "todo" })).toThrow(TypeError);
+    expect(() => store.updateType("meeting", { name: "task" })).toThrow(
+      TypeError,
+    );
+    expect(() => store.updateType("nope", {})).toThrow(ObjectStoreError);
   });
 
   it("refuses contexts that would create a cycle and unknown hosts", () => {

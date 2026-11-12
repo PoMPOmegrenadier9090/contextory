@@ -7,16 +7,27 @@ export interface DocNode {
   readonly marks?: readonly unknown[];
 }
 
+/** 文書木に並ぶFieldの1行。値はインライン内容。 */
+export interface ObjectFieldContent {
+  readonly id: string;
+  readonly name: string;
+  readonly value: readonly DocNode[];
+}
+
 /** 文書から切り出したObjectの中身。配置側の属性は含まない。 */
 export interface ObjectContent {
   /** type、doneなどObject自身の属性 */
   readonly attrs: Readonly<Record<string, unknown>>;
   readonly title: readonly DocNode[];
+  /** Titleと本文の間に並ぶField。文書木に行が無ければ空。 */
+  readonly fields?: readonly ObjectFieldContent[];
   readonly body: readonly DocNode[];
 }
 
 export interface SplitResult {
   readonly host: DocNode;
+  /** 文書の先頭に並ぶ、host自身のField */
+  readonly hostFields: readonly ObjectFieldContent[];
   readonly objects: Readonly<Record<string, ObjectContent>>;
   /** 文書内で各Objectを直接包んでいるObject。最上位ならnull。 */
   readonly parents: Readonly<Record<string, string | null>>;
@@ -36,6 +47,26 @@ export const timeFromId = (id: unknown): number | null => {
   return match ? Number.parseInt(match[1]!, 16) : null;
 };
 
+export const fieldNode = (field: ObjectFieldContent): DocNode => ({
+  type: "objectField",
+  attrs: { fieldId: field.id, name: field.name },
+  ...(field.value.length ? { content: field.value } : {}),
+});
+
+/** 子からField行を取り分ける。 */
+const takeFields = (
+  children: readonly DocNode[],
+): [ObjectFieldContent[], DocNode[]] => [
+  children
+    .filter((child) => child.type === "objectField")
+    .map((child) => ({
+      id: String(child.attrs?.fieldId),
+      name: typeof child.attrs?.name === "string" ? child.attrs.name : "",
+      value: child.content ?? [],
+    })),
+  children.filter((child) => child.type !== "objectField"),
+];
+
 /**
  * 編集中は一つの文書木として扱い、保存時にObject単位へ分ける。
  * objectBlockを埋め込み参照へ置き換え、本文はObjectごとに切り出す。
@@ -50,15 +81,17 @@ export const splitDocument = (doc: DocNode): SplitResult => {
     }
     const attrs = node.attrs ?? {};
     const id = String(attrs.objectId);
-    const [title, ...body] = (node.content ?? []).map((child) =>
+    const [title, ...rest] = (node.content ?? []).map((child) =>
       visit(child, id),
     );
+    const [fields, body] = takeFields(rest);
     parents[id] = parent;
     objects[id] = {
       attrs: Object.fromEntries(
         Object.entries(attrs).filter(([key]) => !PLACEMENT_ATTRS.includes(key)),
       ),
       title: title?.content ?? [],
+      fields,
       body,
     };
     return {
@@ -68,7 +101,9 @@ export const splitDocument = (doc: DocNode): SplitResult => {
       ),
     };
   };
-  return { host: visit(doc, null), objects, parents };
+  const host = visit(doc, null);
+  const [hostFields, content] = takeFields(host.content ?? []);
+  return { host: { ...host, content }, hostFields, objects, parents };
 };
 
 /** 保存形式から編集用の文書木へ戻す。循環する埋め込みは展開しない。 */
@@ -93,6 +128,7 @@ export const joinDocument = (
         object.title.length
           ? { type: "objectTitle", content: object.title }
           : { type: "objectTitle" },
+        ...(object.fields ?? []).map(fieldNode),
         ...object.body.map((child) => visit(child, inner)),
       ],
     };

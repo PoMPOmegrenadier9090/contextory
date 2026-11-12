@@ -1,12 +1,15 @@
 import {
   inheritedContexts,
   newId,
+  TYPE_COLORS,
   type DocNode,
+  type FieldDefinition,
   type ObjectPage,
   type ObjectRecord,
   type ObjectSummary,
   type ObjectTimelineEntry,
   type ObjectType,
+  type TypeDefinition,
 } from "@pkm/core";
 import { ObjectEditor, typeLabel, type EditorHost } from "@pkm/editor";
 import { useEffect, useRef, useState } from "react";
@@ -24,7 +27,6 @@ const isDaily = (hostId: string): boolean => hostId.startsWith("daily:");
 interface Overview {
   readonly navigation: readonly ObjectSummary[];
   readonly recent: readonly ObjectSummary[];
-  readonly types: readonly string[];
 }
 
 const api = async <T,>(
@@ -182,6 +184,192 @@ const FILTERS: readonly (readonly [TimelineFilter, string])[] = [
   ["mention", "言及"],
 ];
 
+const KIND_LABEL = { text: "テキスト", reference: "参照" } as const;
+
+/** 種別のページ。名前・色・Fieldをここで定義する。 */
+const TypePage = ({
+  definition,
+  objects,
+  onPatch,
+  row,
+}: {
+  readonly definition: TypeDefinition;
+  readonly objects: readonly ObjectSummary[];
+  readonly onPatch: (patch: {
+    name?: string;
+    color?: string | null;
+    fields?: readonly FieldDefinition[];
+  }) => void;
+  readonly row: (object: ObjectSummary) => React.JSX.Element;
+}): React.JSX.Element => {
+  const { fields } = definition;
+  const setField = (index: number, patch: Partial<FieldDefinition>): void =>
+    onPatch({
+      fields: fields.map((field, i) =>
+        i === index ? { ...field, ...patch } : field,
+      ),
+    });
+  const move = (index: number, to: number): void => {
+    const next = [...fields];
+    next.splice(to, 0, ...next.splice(index, 1));
+    onPatch({ fields: next });
+  };
+  // 入力中は確定せず、フォーカスを外した時かEnterで保存する。
+  const commitOnEnter = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ): void => {
+    if (event.key === "Enter" && !event.nativeEvent.isComposing)
+      event.currentTarget.blur();
+  };
+  return (
+    <>
+      <header
+        className="od-page-header"
+        data-type={definition.name}
+        data-color={definition.color ?? undefined}
+      >
+        <span className="od-type">種別</span>
+        <input
+          key={definition.name}
+          className="od-page-title"
+          aria-label="種別の名前"
+          defaultValue={typeLabel(definition.name)}
+          disabled={definition.builtin}
+          onKeyDown={commitOnEnter}
+          onBlur={(event) => {
+            const name = event.currentTarget.value.trim();
+            if (name && name !== definition.name) onPatch({ name });
+          }}
+        />
+        <div className="od-page-meta od-colors" aria-label="色">
+          <button
+            type="button"
+            aria-pressed={definition.color === null}
+            onClick={() => onPatch({ color: null })}
+          >
+            既定
+          </button>
+          {TYPE_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className="od-swatch"
+              data-color={color}
+              aria-label={color}
+              aria-pressed={definition.color === color}
+              onClick={() => onPatch({ color })}
+            />
+          ))}
+        </div>
+      </header>
+      <section className="od-panel">
+        <header>
+          <div>
+            <h2>Field</h2>
+            <p>上にあるものほど優先して見せる。外したFieldの値は消える</p>
+          </div>
+        </header>
+        <ul className="od-fields">
+          {fields.map((field, index) => (
+            <li key={field.id}>
+              {field.kind === "context" ? (
+                <>
+                  <strong>{field.name}</strong>
+                  <small>すべての種別が持つ。推移的に集める</small>
+                </>
+              ) : (
+                <>
+                  <input
+                    key={field.name}
+                    aria-label="Fieldの名前"
+                    defaultValue={field.name}
+                    onKeyDown={commitOnEnter}
+                    onBlur={(event) => {
+                      const name = event.currentTarget.value.trim();
+                      if (name && name !== field.name)
+                        setField(index, { name });
+                    }}
+                  />
+                  <select
+                    aria-label="Fieldの型"
+                    value={field.kind}
+                    onChange={(event) =>
+                      setField(index, {
+                        kind: event.currentTarget.value as "text" | "reference",
+                      })
+                    }
+                  >
+                    {Object.entries(KIND_LABEL).map(([kind, label]) => (
+                      <option key={kind} value={kind}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+              <span className="od-field-actions">
+                <button
+                  type="button"
+                  aria-label="上へ"
+                  disabled={index === 0}
+                  onClick={() => move(index, index - 1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  aria-label="下へ"
+                  disabled={index === fields.length - 1}
+                  onClick={() => move(index, index + 1)}
+                >
+                  ↓
+                </button>
+                {field.kind === "context" ? null : (
+                  <button
+                    type="button"
+                    aria-label={`${field.name}を削除`}
+                    onClick={() =>
+                      onPatch({ fields: fields.filter((_, i) => i !== index) })
+                    }
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <button
+          type="button"
+          className="od-add-field"
+          onClick={() =>
+            onPatch({
+              fields: [
+                ...fields,
+                { id: newId(), name: "新しいField", kind: "text" },
+              ],
+            })
+          }
+        >
+          ＋ Fieldを追加
+        </button>
+      </section>
+      <section className="od-panel">
+        <header>
+          <div>
+            <h2>この種別のObject</h2>
+          </div>
+        </header>
+        {objects.length ? (
+          <ul className="od-rows">{objects.map(row)}</ul>
+        ) : (
+          <p className="od-empty">まだありません。</p>
+        )}
+      </section>
+    </>
+  );
+};
+
 /** 保存を少し待ってまとめる時間。 */
 const SAVE_DELAY = 400;
 
@@ -198,8 +386,13 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
   const [overview, setOverview] = useState<Overview>({
     navigation: [],
     recent: [],
-    types: [],
   });
+  const [types, setTypes] = useState<readonly TypeDefinition[]>([]);
+  /** 開いている種別のページと、その種別のObject */
+  const [typePage, setTypePage] = useState<{
+    readonly name: string;
+    readonly objects: readonly ObjectSummary[];
+  } | null>(null);
   const [filter, setFilter] = useState<TimelineFilter>("all");
   /** "saved"、"saving"、または失敗の理由 */
   const [status, setStatus] = useState("saved");
@@ -229,8 +422,9 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
   };
 
   const refreshSide = async (hostId: string): Promise<void> => {
-    const [nextOverview, nextTimeline] = await Promise.all([
+    const [nextOverview, nextTypes, nextTimeline] = await Promise.all([
       api<Overview>("GET", `/overview?since=${startOfToday()}`),
+      api<TypeDefinition[]>("GET", "/types"),
       isDaily(hostId)
         ? Promise.resolve([])
         : api<ObjectTimelineEntry[]>(
@@ -239,6 +433,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
           ),
     ]);
     setOverview(nextOverview);
+    setTypes(nextTypes);
     setTimeline(nextTimeline);
     merge(
       Object.fromEntries(
@@ -274,10 +469,36 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
       const own = result.objects[hostId]?.title ?? "";
       setTitle(own === "無題" ? "" : own);
       setLoaded({ key: ++loads.current, hostId, doc: result.doc });
+      setTypePage(null);
       setFilter("all");
       await refreshSide(hostId);
       window.scrollTo({ top: 0 });
     });
+  };
+
+  const openType = (name: string): void => {
+    flush();
+    void enqueue(async () => {
+      const [nextTypes, found] = await Promise.all([
+        api<TypeDefinition[]>("GET", "/types"),
+        api<ObjectSummary[]>("GET", `/objects?type=${encode(name)}`),
+      ]);
+      setTypes(nextTypes);
+      // 文書は開き直した時に、新しい定義で組み立て直す。
+      setLoaded(null);
+      merge(Object.fromEntries(found.map((o) => [o.id, o])));
+      setTypePage({ name, objects: found });
+      window.scrollTo({ top: 0 });
+    });
+  };
+  const patchType = (
+    name: string,
+    patch: Parameters<React.ComponentProps<typeof TypePage>["onPatch"]>[0],
+  ): void => {
+    void enqueue(async () => {
+      await api("PATCH", `/types/${encode(name)}`, patch);
+    });
+    openType(patch.name ?? name);
   };
 
   const reset = (hostId: string): void => {
@@ -325,7 +546,8 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
 
   const host: EditorHost = {
     lookup: (id) => objects[id],
-    types: () => overview.types,
+    types: () => types,
+    page: current ? { id: current.id, type: current.type } : null,
     search: (query) =>
       api<ObjectSummary[]>(
         "GET",
@@ -359,11 +581,18 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     },
   };
 
+  const colorOf = (type: ObjectType): string | undefined =>
+    types.find((definition) => definition.name === type)?.color ?? undefined;
   const objectRow = (
     object: ObjectSummary,
     note: string,
   ): React.JSX.Element => (
-    <li className="od-row" data-type={object.type} key={object.id}>
+    <li
+      className="od-row"
+      data-type={object.type}
+      data-color={colorOf(object.type)}
+      key={object.id}
+    >
       <span className="od-type">{typeLabel(object.type)}</span>
       <button type="button" onClick={() => open(object.id)}>
         <strong>{object.title}</strong>
@@ -429,15 +658,6 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
       {object.title}
     </button>
   );
-  const contextCandidates = current
-    ? Object.values(objects).filter(
-        (o) =>
-          o.type !== "memo" &&
-          o.id !== current.id &&
-          !current.contexts.includes(o.id),
-      )
-    : [];
-
   return (
     <div className="od-demo">
       <header className="od-topbar">
@@ -485,6 +705,20 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
               (p) => !p.contexts.some((id) => areas.some((a) => a.id === id)),
             )
             .map((project) => navButton(project, "od-nav-project"))}
+          <p className="od-nav-heading">種別</p>
+          {types.map((definition) => (
+            <button
+              key={definition.name}
+              type="button"
+              className="od-nav-project"
+              aria-current={
+                typePage?.name === definition.name ? "page" : undefined
+              }
+              onClick={() => openType(definition.name)}
+            >
+              #{typeLabel(definition.name)}
+            </button>
+          ))}
           <dl className="od-keys">
             <dt>@</dt>
             <dd>参照・新規作成</dd>
@@ -498,181 +732,164 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
           <p className="od-nav-note">Prototype · サーバーのSQLiteへ保存</p>
         </nav>
         <main className="od-main">
-          {current ? (
-            <header className="od-page-header" data-type={current.type}>
-              <span className="od-type">{typeLabel(current.type)}</span>
-              <input
-                className="od-page-title"
-                aria-label="Title"
-                value={title}
-                placeholder="無題"
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setTitle(value);
-                  mutate(() =>
-                    api("PATCH", `/objects/${encode(current.id)}`, {
-                      title: value,
-                    }),
-                  );
-                }}
-              />
-              <div className="od-page-meta">
-                {current.type === "task" ? (
-                  <label className="od-status">
-                    <input
-                      type="checkbox"
-                      checked={current.done}
-                      onChange={() =>
-                        mutate(
-                          () =>
-                            api("PATCH", `/objects/${encode(current.id)}`, {
-                              done: !current.done,
-                            }),
-                          { ...current, done: !current.done },
-                        )
-                      }
-                    />
-                    完了
-                  </label>
-                ) : null}
-                <span className="od-contexts">
-                  {current.contexts.map((id) => (
-                    <span
-                      className="od-context-chip"
-                      key={id}
-                      data-type={objects[id]?.type}
-                    >
-                      <button type="button" onClick={() => open(id)}>
-                        <small>{typeLabel(objects[id]?.type ?? "memo")}</small>
-                        {objects[id]?.title ?? "削除されたObject"}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`${objects[id]?.title ?? ""}のContextを外す`}
-                        onClick={() =>
-                          mutate(() =>
-                            api(
-                              "DELETE",
-                              `/objects/${encode(current.id)}/contexts/${encode(id)}`,
-                            ),
-                          )
-                        }
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                  <select
-                    className="od-add-context"
-                    aria-label="Contextを追加"
-                    value=""
+          {typePage ? (
+            <TypePage
+              definition={
+                types.find(
+                  (definition) => definition.name === typePage.name,
+                ) ?? {
+                  name: typePage.name,
+                  color: null,
+                  builtin: false,
+                  fields: [],
+                }
+              }
+              objects={typePage.objects}
+              onPatch={(patch) => patchType(typePage.name, patch)}
+              row={(object) => objectRow(object, "")}
+            />
+          ) : (
+            <>
+              {current ? (
+                <header
+                  className="od-page-header"
+                  data-type={current.type}
+                  data-color={colorOf(current.type)}
+                >
+                  <button
+                    type="button"
+                    className="od-type"
+                    onClick={() => openType(current.type)}
+                  >
+                    #{typeLabel(current.type)}
+                  </button>
+                  <input
+                    className="od-page-title"
+                    aria-label="Title"
+                    value={title}
+                    placeholder="無題"
                     onChange={(event) => {
-                      const target = event.currentTarget.value;
+                      const value = event.currentTarget.value;
+                      setTitle(value);
                       mutate(() =>
-                        api(
-                          "PUT",
-                          `/objects/${encode(current.id)}/contexts/${encode(target)}`,
-                        ),
+                        api("PATCH", `/objects/${encode(current.id)}`, {
+                          title: value,
+                        }),
                       );
                     }}
-                  >
-                    <option value="">＋ Context</option>
-                    {contextCandidates.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {typeLabel(o.type)} · {o.title}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-              </div>
-            </header>
-          ) : (
-            <header className="od-page-header">
-              <span className="od-type">Daily</span>
-              <h1>
-                {new Intl.DateTimeFormat("ja-JP", {
-                  month: "long",
-                  day: "numeric",
-                  weekday: "short",
-                }).format(new Date())}
-              </h1>
-              <p className="od-page-lead">
-                自由に書く。@で触れた段落・見出し・リスト項目は、参照先のTimelineに出る。
-              </p>
-            </header>
-          )}
-
-          {loaded ? (
-            <section className="od-document">
-              <ObjectEditor
-                key={loaded.key}
-                initialDoc={loaded.doc}
-                host={host}
-                ariaLabel={isDaily(loaded.hostId) ? "Daily本文" : "本文"}
-                onChange={(doc) => {
-                  pending.current = { hostId: loaded.hostId, doc };
-                  window.clearTimeout(timer.current);
-                  timer.current = window.setTimeout(flush, SAVE_DELAY);
-                }}
-              />
-            </section>
-          ) : (
-            <p className="od-empty">読み込み中…</p>
-          )}
-
-          {current ? (
-            <section className="od-panel">
-              <header>
-                <div>
-                  <h2>Timeline</h2>
-                  <p>
-                    Contextで属する記録と、@で言及した記述。配下のObjectの分も集める
+                  />
+                  <div className="od-page-meta">
+                    {current.type === "task" ? (
+                      <label className="od-status">
+                        <input
+                          type="checkbox"
+                          checked={current.done}
+                          onChange={() =>
+                            mutate(
+                              () =>
+                                api("PATCH", `/objects/${encode(current.id)}`, {
+                                  done: !current.done,
+                                }),
+                              { ...current, done: !current.done },
+                            )
+                          }
+                        />
+                        完了
+                      </label>
+                    ) : null}
+                  </div>
+                </header>
+              ) : (
+                <header className="od-page-header">
+                  <span className="od-type">Daily</span>
+                  <h1>
+                    {new Intl.DateTimeFormat("ja-JP", {
+                      month: "long",
+                      day: "numeric",
+                      weekday: "short",
+                    }).format(new Date())}
+                  </h1>
+                  <p className="od-page-lead">
+                    自由に書く。@で触れた段落・見出し・リスト項目は、参照先のTimelineに出る。
                   </p>
-                </div>
-                <div className="od-segmented" aria-label="Timeline filter">
-                  {FILTERS.map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      aria-pressed={filter === value}
-                      onClick={() => setFilter(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </header>
-              {shownTimeline.length ? (
-                <ul className="od-rows">{shownTimeline.map(timelineRow)}</ul>
-              ) : (
-                <p className="od-empty">まだありません。</p>
+                </header>
               )}
-            </section>
-          ) : (
-            <section className="od-panel">
-              <header>
-                <div>
-                  <h2>今日の記録</h2>
-                  <p>今日作成したObject。本文は複製せず、元の場所が正本</p>
-                </div>
-              </header>
-              {overview.recent.length ? (
-                <ul className="od-rows">
-                  {overview.recent.map((object) =>
-                    objectRow(
-                      object,
-                      object.contexts.length
-                        ? object.contexts
-                            .map((id) => objects[id]?.title ?? "")
-                            .join("、")
-                        : "Contextなし",
-                    ),
+
+              {loaded ? (
+                <section className="od-document">
+                  <ObjectEditor
+                    key={loaded.key}
+                    initialDoc={loaded.doc}
+                    host={host}
+                    ariaLabel={isDaily(loaded.hostId) ? "Daily本文" : "本文"}
+                    onChange={(doc) => {
+                      pending.current = { hostId: loaded.hostId, doc };
+                      window.clearTimeout(timer.current);
+                      timer.current = window.setTimeout(flush, SAVE_DELAY);
+                    }}
+                  />
+                </section>
+              ) : (
+                <p className="od-empty">読み込み中…</p>
+              )}
+
+              {current ? (
+                <section className="od-panel">
+                  <header>
+                    <div>
+                      <h2>Timeline</h2>
+                      <p>
+                        Contextで属する記録と、@で言及した記述。配下のObjectの分も集める
+                      </p>
+                    </div>
+                    <div className="od-segmented" aria-label="Timeline filter">
+                      {FILTERS.map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={filter === value}
+                          onClick={() => setFilter(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </header>
+                  {shownTimeline.length ? (
+                    <ul className="od-rows">
+                      {shownTimeline.map(timelineRow)}
+                    </ul>
+                  ) : (
+                    <p className="od-empty">まだありません。</p>
                   )}
-                </ul>
+                </section>
               ) : (
-                <p className="od-empty">まだありません。</p>
+                <section className="od-panel">
+                  <header>
+                    <div>
+                      <h2>今日の記録</h2>
+                      <p>今日作成したObject。本文は複製せず、元の場所が正本</p>
+                    </div>
+                  </header>
+                  {overview.recent.length ? (
+                    <ul className="od-rows">
+                      {overview.recent.map((object) =>
+                        objectRow(
+                          object,
+                          object.contexts.length
+                            ? object.contexts
+                                .map((id) => objects[id]?.title ?? "")
+                                .join("、")
+                            : "Contextなし",
+                        ),
+                      )}
+                    </ul>
+                  ) : (
+                    <p className="od-empty">まだありません。</p>
+                  )}
+                </section>
               )}
-            </section>
+            </>
           )}
         </main>
       </div>

@@ -21,6 +21,40 @@ export const normalizeObjectType = (value: unknown): ObjectType | null => {
   );
 };
 
+export const FIELD_KINDS = ["context", "text", "reference"] as const;
+export type FieldKind = (typeof FIELD_KINDS)[number];
+
+export interface FieldDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: FieldKind;
+}
+
+/** すべての種別が持つField。値はContextそのもので、推移的に収集される。 */
+export const CONTEXT_FIELD: FieldDefinition = {
+  id: "context",
+  name: "Context",
+  kind: "context",
+};
+
+export const TYPE_COLORS = [
+  "blue",
+  "amber",
+  "purple",
+  "green",
+  "rose",
+  "gray",
+] as const;
+
+export interface TypeDefinition {
+  readonly name: ObjectType;
+  /** TYPE_COLORSのいずれか。nullなら種別の既定の色。 */
+  readonly color: string | null;
+  readonly builtin: boolean;
+  /** 表示順。上にあるものほど優先して見せる。 */
+  readonly fields: readonly FieldDefinition[];
+}
+
 /** Objectは独立した本文を持ち、文書には埋め込みBlockとして置かれる。 */
 export interface ObjectRecord {
   readonly id: string;

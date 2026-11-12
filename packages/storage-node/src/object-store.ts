@@ -3,7 +3,10 @@ import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import {
   collectMentionUnits,
+  CONTEXT_FIELD,
   embeddedIds,
+  FIELD_KINDS,
+  fieldNode,
   inheritedContexts,
   inlineText,
   joinDocument,
@@ -12,16 +15,20 @@ import {
   refIds,
   splitDocument,
   timeFromId,
+  TYPE_COLORS,
   type DocNode,
+  type FieldDefinition,
   type ObjectContent,
+  type ObjectFieldContent,
   type ObjectPage,
   type ObjectRecord,
   type ObjectSummary,
   type ObjectTimelineEntry,
   type ObjectType,
+  type TypeDefinition,
 } from "@pkm/core";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 1;
+export const OBJECT_STORE_SCHEMA_VERSION = 2;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
@@ -132,6 +139,36 @@ export class ObjectStore {
         `);
         this.database.pragma("user_version = 1");
       })();
+    if (version < 2)
+      this.database.transaction(() => {
+        // extendsは継承用。まだ読み書きしていない。
+        this.database.exec(`
+          CREATE TABLE types (
+            name TEXT PRIMARY KEY,
+            color TEXT,
+            extends TEXT,
+            created_at INTEGER NOT NULL
+          ) WITHOUT ROWID;
+          CREATE TABLE fields (
+            type TEXT NOT NULL,
+            id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (type, id)
+          ) WITHOUT ROWID;
+          CREATE TABLE field_values (
+            object_id TEXT NOT NULL,
+            field_id TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (object_id, field_id)
+          ) WITHOUT ROWID;
+          CREATE INDEX field_values_field ON field_values(field_id);
+          INSERT INTO types (name, created_at) SELECT DISTINCT type, 0 FROM objects;
+        `);
+        this.database.pragma("user_version = 2");
+      })();
+    for (const type of OBJECT_TYPES) this.ensureType(type, 0);
   }
 
   close(): void {
@@ -233,10 +270,90 @@ export class ObjectStore {
         done: done ? 1 : 0,
         now,
       });
+    this.ensureType(type, now);
     // shortcut: 検索用のTitleは書き込み時点のもの。参照先のTitle変更には追従しない。
     this.database
       .prepare("UPDATE objects SET title_text = ? WHERE id = ?")
       .run(this.text(title), id);
+  }
+
+  private ensureType(name: ObjectType, now: number): void {
+    this.database
+      .prepare("INSERT OR IGNORE INTO types (name, created_at) VALUES (?, ?)")
+      .run(name, now);
+  }
+
+  /** 種別のField。Contextは保存が無くても先頭に持つ。 */
+  private fieldsOf(type: ObjectType): FieldDefinition[] {
+    const fields = this.database
+      .prepare(
+        "SELECT id, name, kind FROM fields WHERE type = ? ORDER BY position",
+      )
+      .all(type) as FieldDefinition[];
+    return fields.some((field) => field.id === CONTEXT_FIELD.id)
+      ? fields
+      : [CONTEXT_FIELD, ...fields];
+  }
+
+  /** 文書木に並べるField行。Contextは参照チップの並びにする。 */
+  private fieldContents(row: ObjectRow): ObjectFieldContent[] {
+    const values = new Map(
+      (
+        this.database
+          .prepare(
+            "SELECT field_id, value FROM field_values WHERE object_id = ?",
+          )
+          .all(row.id) as { field_id: string; value: string }[]
+      ).map((value) => [value.field_id, nodes(value.value)]),
+    );
+    return this.fieldsOf(row.type).map((field) => ({
+      id: field.id,
+      name: field.name,
+      value:
+        field.kind === "context"
+          ? this.contextsOf(row.id).flatMap((objectId): DocNode[] => [
+              { type: "objectRef", attrs: { objectId } },
+              { type: "text", text: " " },
+            ])
+          : (values.get(field.id) ?? []),
+    }));
+  }
+
+  /** 文書木のField行を保存する。行が無いFieldには触れない。 */
+  private saveFields(id: string, fields: readonly ObjectFieldContent[]): void {
+    const row = this.requireRow(id);
+    const known = new Map(this.fieldsOf(row.type).map((f) => [f.id, f]));
+    for (const field of fields) {
+      const kind = known.get(field.id)?.kind;
+      if (kind === "context") {
+        this.setContexts(id, []);
+        // 存在しない相手や、循環になる相手は取り込まない。
+        for (const target of new Set(refIds(field.value)))
+          if (this.row(target) && !this.reaches(id, target))
+            this.setContexts(id, [...this.contextsOf(id), target]);
+      } else if (kind && field.value.length)
+        this.database
+          .prepare(
+            `INSERT INTO field_values (object_id, field_id, value) VALUES (?, ?, ?)
+             ON CONFLICT(object_id, field_id) DO UPDATE SET value = excluded.value`,
+          )
+          .run(id, field.id, JSON.stringify(field.value));
+      else if (kind)
+        this.database
+          .prepare(
+            "DELETE FROM field_values WHERE object_id = ? AND field_id = ?",
+          )
+          .run(id, field.id);
+    }
+  }
+
+  /** targetがid自身か、すでにidの配下にあるか。 */
+  private reaches(id: string, targetId: string): boolean {
+    return Boolean(
+      this.database
+        .prepare(`${REACH} SELECT 1 FROM reach WHERE id = ?`)
+        .get(id, targetId),
+    );
   }
 
   private setContexts(id: string, contexts: readonly string[]): void {
@@ -292,6 +409,7 @@ export class ObjectStore {
       "DELETE FROM contexts WHERE object_id = ? OR target_id = ?",
       "DELETE FROM placements WHERE host_id = ?",
       "DELETE FROM mentions WHERE host_id = ?",
+      "DELETE FROM field_values WHERE object_id = ?",
     ])
       this.database.prepare(sql).run(...(sql.includes("OR") ? [id, id] : [id]));
   }
@@ -303,18 +421,28 @@ export class ObjectStore {
     const body = this.hostBody(hostId);
     const placed = this.placedIds(hostId);
     const contents: Record<string, ObjectContent> = {};
-    const ids = new Set<string>([hostId, ...placed, ...refIds(body)]);
+    const host = this.row(hostId);
+    const hostFields = (host ? this.fieldContents(host) : []).map(fieldNode);
+    const ids = new Set<string>([
+      hostId,
+      ...placed,
+      ...refIds(body),
+      ...refIds(hostFields),
+    ]);
     for (const id of placed) {
       const row = this.row(id);
       if (!row) continue;
+      const fields = this.fieldContents(row);
       contents[id] = {
         attrs: { type: row.type, done: row.done === 1 },
         title: nodes(row.title),
+        fields,
         body: nodes(row.body),
       };
       for (const target of [
         ...refIds(contents[id].title),
         ...refIds(contents[id].body),
+        ...refIds(fields.flatMap((field) => field.value)),
       ])
         ids.add(target);
     }
@@ -329,7 +457,7 @@ export class ObjectStore {
       for (const context of include(id)?.contexts ?? []) include(context);
     return {
       doc: joinDocument(
-        { type: "doc", content: body },
+        { type: "doc", content: [...hostFields, ...body] },
         contents,
         new Set([hostId]),
       ),
@@ -365,7 +493,11 @@ export class ObjectStore {
           Boolean(content.attrs.done),
           now,
         );
-        if (isNew && parentId !== null) {
+        // 文書木がContextの行を持つなら、後でその内容を正とする。
+        const explicit = content.fields?.some(
+          (field) => field.id === CONTEXT_FIELD.id,
+        );
+        if (isNew && parentId !== null && !explicit) {
           const parent = this.row(parentId);
           this.setContexts(
             id,
@@ -374,6 +506,10 @@ export class ObjectStore {
         }
       };
       for (const id of Object.keys(split.objects)) ensure(id);
+      // 参照先が同じ保存で作られることがあるので、Fieldは全件を作ってから保存する。
+      for (const id of saved)
+        this.saveFields(id, split.objects[id]?.fields ?? []);
+      if (host) this.saveFields(hostId, split.hostFields);
 
       const body = JSON.stringify(split.host.content ?? []);
       if (host)
@@ -467,10 +603,7 @@ export class ObjectStore {
       this.requireRow(id);
       this.requireRow(targetId);
       // targetがすでにidの配下なら、循環になるので受け付けない。
-      const below = this.database
-        .prepare(`${REACH} SELECT 1 FROM reach WHERE id = ?`)
-        .get(id, targetId);
-      if (below)
+      if (this.reaches(id, targetId))
         throw new ObjectStoreError(
           "INVALID_CONTEXT",
           "Context would create a cycle",
@@ -502,11 +635,121 @@ export class ObjectStore {
     return rows.map((row) => this.summary(row));
   }
 
-  /** 画面の入口に出すObject、since以降に作成したObject、ユーザーが作った種別。 */
+  /** 種別のObjectを新しい順に返す。 */
+  objectsOfType(type: ObjectType): ObjectSummary[] {
+    return (
+      this.database
+        .prepare(
+          "SELECT * FROM objects WHERE type = ? ORDER BY created_at DESC",
+        )
+        .all(type) as ObjectRow[]
+    ).map((row) => this.summary(row));
+  }
+
+  /* ---------- types ---------- */
+
+  /** 種別の定義。組み込みの種別を先に、ユーザーが作った種別を作成順に並べる。 */
+  types(): TypeDefinition[] {
+    const rows = this.database
+      .prepare("SELECT name, color FROM types ORDER BY created_at, name")
+      .all() as { name: string; color: string | null }[];
+    const builtins: readonly string[] = OBJECT_TYPES;
+    const order = (name: string): number =>
+      builtins.includes(name) ? builtins.indexOf(name) : builtins.length;
+    return rows
+      .sort((a, b) => order(a.name) - order(b.name))
+      .map((row) => ({
+        name: row.name,
+        color: row.color,
+        builtin: builtins.includes(row.name),
+        fields: this.fieldsOf(row.name),
+      }));
+  }
+
+  /** 種別の名前・色・Fieldを変える。外したFieldの値は消す。 */
+  updateType(
+    name: ObjectType,
+    patch: {
+      readonly name?: string;
+      readonly color?: string | null;
+      readonly fields?: readonly FieldDefinition[];
+    },
+  ): TypeDefinition {
+    let current = name;
+    this.database.transaction(() => {
+      const builtins: readonly string[] = OBJECT_TYPES;
+      if (
+        !this.database.prepare("SELECT 1 FROM types WHERE name = ?").get(name)
+      )
+        throw new ObjectStoreError(
+          "OBJECT_NOT_FOUND",
+          `Type not found: ${name}`,
+        );
+      if (patch.color !== undefined) {
+        if (patch.color !== null && !TYPE_COLORS.some((c) => c === patch.color))
+          throw new TypeError("color is not a known type color");
+        this.database
+          .prepare("UPDATE types SET color = ? WHERE name = ?")
+          .run(patch.color, name);
+      }
+      if (patch.fields) {
+        const rest = patch.fields.filter((f) => f.id !== CONTEXT_FIELD.id);
+        const fields = patch.fields.some((f) => f.id === CONTEXT_FIELD.id)
+          ? patch.fields.map((f) =>
+              f.id === CONTEXT_FIELD.id ? CONTEXT_FIELD : f,
+            )
+          : [CONTEXT_FIELD, ...rest];
+        for (const field of rest)
+          if (
+            !field.id ||
+            !field.name.trim() ||
+            field.name.length > 40 ||
+            field.kind === "context" ||
+            !FIELD_KINDS.includes(field.kind)
+          )
+            throw new TypeError("field is invalid");
+        if (new Set(fields.map((f) => f.id)).size !== fields.length)
+          throw new TypeError("field ids must be unique");
+        const kept = JSON.stringify(fields.map((f) => f.id));
+        this.database
+          .prepare(
+            `DELETE FROM field_values
+             WHERE field_id IN (SELECT id FROM fields WHERE type = ?)
+               AND field_id NOT IN (SELECT value FROM json_each(?))`,
+          )
+          .run(name, kept);
+        this.database.prepare("DELETE FROM fields WHERE type = ?").run(name);
+        const insert = this.database.prepare(
+          "INSERT INTO fields (type, id, name, kind, position) VALUES (?, ?, ?, ?, ?)",
+        );
+        fields.forEach((field, position) =>
+          insert.run(name, field.id, field.name.trim(), field.kind, position),
+        );
+      }
+      if (patch.name !== undefined && patch.name !== name) {
+        const next = normalizeObjectType(patch.name);
+        if (
+          !next ||
+          builtins.includes(name) ||
+          this.database.prepare("SELECT 1 FROM types WHERE name = ?").get(next)
+        )
+          throw new TypeError("type cannot be renamed to that name");
+        for (const sql of [
+          "UPDATE types SET name = ? WHERE name = ?",
+          "UPDATE fields SET type = ? WHERE type = ?",
+          "UPDATE objects SET type = ? WHERE type = ?",
+        ])
+          this.database.prepare(sql).run(next, name);
+        current = next;
+      }
+    })();
+    return this.types().find((type) => type.name === current)!;
+  }
+
+  /** 画面の入口に出すObjectと、since以降に作成したObject。 */
   overview(since: number): {
     readonly navigation: ObjectSummary[];
     readonly recent: ObjectSummary[];
-    readonly types: string[];
   } {
     const select = (where: string, ...params: unknown[]): ObjectSummary[] =>
       (
@@ -517,14 +760,6 @@ export class ObjectStore {
     return {
       navigation: select("type IN ('area', 'project') ORDER BY created_at"),
       recent: select("created_at >= ? ORDER BY created_at DESC", since),
-      // 種別の定義はまだ持たず、使われている名前をそのまま種別とみなす。
-      types: (
-        this.database
-          .prepare(
-            `SELECT DISTINCT type FROM objects WHERE type NOT IN (${OBJECT_TYPES.map(() => "?").join()}) ORDER BY type`,
-          )
-          .all(...OBJECT_TYPES) as { type: string }[]
-      ).map((row) => row.type),
     };
   }
 
@@ -618,8 +853,12 @@ export class ObjectStore {
         "contexts",
         "placements",
         "mentions",
+        "field_values",
+        "fields",
+        "types",
       ])
         this.database.exec(`DELETE FROM ${table}`);
+      for (const type of OBJECT_TYPES) this.ensureType(type, 0);
       for (const object of workspace.objects) {
         this.upsertObject(
           object.id,

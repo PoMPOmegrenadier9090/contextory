@@ -71,6 +71,31 @@
   --pe-type: var(--pe-project);
 }
 
+/* 種別のページで選んだ色は、種別の既定の色より優先する。 */
+.pe-editor [data-color="blue"] {
+  --pe-type: var(--pe-task);
+}
+
+.pe-editor [data-color="amber"] {
+  --pe-type: var(--pe-decision);
+}
+
+.pe-editor [data-color="purple"] {
+  --pe-type: var(--pe-memo);
+}
+
+.pe-editor [data-color="green"] {
+  --pe-type: var(--pe-project);
+}
+
+.pe-editor [data-color="rose"] {
+  --pe-type: var(--pe-custom);
+}
+
+.pe-editor [data-color="gray"] {
+  --pe-type: var(--pe-muted);
+}
+
 .pe-editor [data-type="missing"] {
   --pe-type: var(--pe-muted);
   text-decoration: line-through;
@@ -180,6 +205,23 @@
 .pe-object[data-type="task"] [data-object-title] ~ * {
   margin-left: -17px;
   padding-left: 15px;
+}
+
+/* Fieldの行。名前は属性から出し、値だけを編集できる。 */
+.pe-editor [data-object-field] {
+  min-height: 28px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  font-size: 14px;
+}
+
+.pe-editor [data-object-field]::before {
+  display: inline-block;
+  min-width: 84px;
+  margin-right: 8px;
+  color: var(--pe-muted);
+  font-size: 12px;
+  content: attr(data-label);
 }
 
 .pe-object-side {

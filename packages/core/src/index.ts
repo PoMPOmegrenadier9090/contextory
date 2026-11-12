@@ -150,6 +150,7 @@ export { entityQueryAffected } from "./entity-query-impact.js";
 export {
   collectMentionUnits,
   embeddedIds,
+  fieldNode,
   joinDocument,
   newId,
   refIds,
@@ -160,15 +161,22 @@ export type {
   DocNode,
   MentionUnit,
   ObjectContent,
+  ObjectFieldContent,
   SplitResult,
 } from "./object-document.js";
 export {
+  CONTEXT_FIELD,
+  FIELD_KINDS,
   inheritedContexts,
   inlineText,
   normalizeObjectType,
   OBJECT_TYPES,
+  TYPE_COLORS,
 } from "./object-model.js";
 export type {
+  FieldDefinition,
+  FieldKind,
+  TypeDefinition,
   ObjectPage,
   ObjectRecord,
   ObjectSummary,

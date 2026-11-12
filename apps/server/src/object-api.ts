@@ -3,6 +3,7 @@ import {
   requireRequestRecord as requireRecord,
   requireRequestString as requireString,
   type DocNode,
+  type FieldKind,
   type ObjectRecord,
 } from "@pkm/core";
 import type { ObjectStore } from "@pkm/storage-node";
@@ -38,6 +39,7 @@ export const registerObjectRoutes = (
 
   app.get("/api/next/objects", (request) => {
     const query = requireRecord(request.query);
+    if (typeof query.type === "string") return store.objectsOfType(query.type);
     return store.search(
       typeof query.query === "string" ? query.query : "",
       typeof query.exclude === "string" ? query.exclude : null,
@@ -88,6 +90,29 @@ export const registerObjectRoutes = (
   app.get("/api/next/objects/:id/timeline", (request) =>
     store.timeline(param(request.params, "id")),
   );
+
+  app.get("/api/next/types", () => store.types());
+  app.patch("/api/next/types/:name", (request) => {
+    const body = requireRecord(request.body);
+    return store.updateType(param(request.params, "name"), {
+      ...(typeof body.name === "string" ? { name: body.name } : {}),
+      ...(typeof body.color === "string" || body.color === null
+        ? { color: body.color }
+        : {}),
+      ...(Array.isArray(body.fields)
+        ? {
+            fields: (body.fields as unknown[]).map((value) => {
+              const field = requireRecord(value);
+              return {
+                id: requireString(field.id, "id"),
+                name: requireString(field.name, "name"),
+                kind: requireString(field.kind, "kind") as FieldKind,
+              };
+            }),
+          }
+        : {}),
+    });
+  });
 
   app.get("/api/next/overview", (request) => {
     const since = Number(requireRecord(request.query).since ?? 0);

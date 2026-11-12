@@ -1,4 +1,5 @@
 import UniqueID from "@tiptap/extension-unique-id";
+import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import { PluginKey, TextSelection } from "@tiptap/pm/state";
 import {
   EditorContent,
@@ -28,10 +29,12 @@ import {
   type RefObject,
 } from "react";
 import {
+  CONTEXT_FIELD,
   newId,
   normalizeObjectType,
   type DocNode,
   type ObjectType,
+  type TypeDefinition,
 } from "@pkm/core";
 
 /** エディタが表示に使うObjectの情報。 */
@@ -52,8 +55,10 @@ export interface EditorHost {
     parentId: string | null,
   ) => string;
   readonly open: (id: string) => void;
-  /** ユーザーが作った種別の名前。 */
-  readonly types: () => readonly string[];
+  /** 種別の定義。組み込みの種別も含む。 */
+  readonly types: () => readonly TypeDefinition[];
+  /** 開いている文書がObjectの本文なら、そのObject。 */
+  readonly page: { readonly id: string; readonly type: ObjectType } | null;
   /** 置かれた場所から自明でないContext。 */
   readonly contexts: (
     id: string,
@@ -88,6 +93,41 @@ const enclosingObjectId = (editor: Editor, pos: number): string | null => {
   return null;
 };
 
+const typeOf = (
+  host: EditorHost,
+  type: ObjectType,
+): TypeDefinition | undefined =>
+  host.types().find((definition) => definition.name === type);
+
+/** nodeの直下にあるContextの行が指すObject。 */
+const contextRefs = (node: PMNode): string[] => {
+  const ids: string[] = [];
+  node.forEach((child) => {
+    if (
+      child.type.name === "objectField" &&
+      child.attrs.fieldId === CONTEXT_FIELD.id
+    )
+      child.forEach((inline) => {
+        if (inline.type.name === "objectRef")
+          ids.push(String(inline.attrs.objectId));
+      });
+  });
+  return ids;
+};
+
+/** $posに作るObjectが継ぐContext。Memoの中ではMemoのContextを継ぐ。 */
+const inheritedAt = ($pos: ResolvedPos, host: EditorHost): string[] => {
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    const node = $pos.node(depth);
+    if (node.type.name === "objectBlock")
+      return node.attrs.type === "memo"
+        ? contextRefs(node)
+        : [String(node.attrs.objectId)];
+  }
+  if (!host.page) return [];
+  return host.page.type === "memo" ? contextRefs($pos.doc) : [host.page.id];
+};
+
 /* ---------- nodes ---------- */
 
 const RefChip = ({ node }: NodeViewProps): React.JSX.Element => {
@@ -99,6 +139,7 @@ const RefChip = ({ node }: NodeViewProps): React.JSX.Element => {
       as="span"
       className="pe-chip"
       data-type={info?.type ?? "missing"}
+      data-color={info ? typeOf(host, info.type)?.color : undefined}
       onClick={() => host.open(id)}
     >
       {info ? info.title : "削除されたObject"}
@@ -128,6 +169,54 @@ const ObjectTitle = Node.create({
   renderHTML: () => ["div", { "data-object-title": "" }, 0],
 });
 
+/** 文書の先頭にも、開いているObject自身のFieldを並べられるようにする。 */
+const Document = Node.create({
+  name: "doc",
+  topNode: true,
+  content: "objectField* block+",
+});
+
+/** 次の行へ進む。最後のFieldなら本文の段落を作る。 */
+const leaveField = (editor: Editor): boolean => {
+  const { $from } = editor.state.selection;
+  if ($from.parent.type.name !== "objectField") return false;
+  const after = $from.after();
+  const isLast = $from.indexAfter($from.depth - 1) >= $from.node(-1).childCount;
+  return editor
+    .chain()
+    .command(({ tr, state }) => {
+      if (isLast) tr.insert(after, state.schema.nodes.paragraph!.create());
+      tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1)));
+      return true;
+    })
+    .scrollIntoView()
+    .run();
+};
+
+/** Fieldの1行。値はインライン内容で、@がそのまま使える。 */
+const ObjectField = Node.create({
+  name: "objectField",
+  content: "inline*",
+  defining: true,
+  isolating: true, // BackspaceやDeleteで、隣の行とつながらないようにする。
+  addAttributes: () => ({
+    fieldId: { default: "", rendered: false },
+    name: { default: "", rendered: false },
+  }),
+  parseHTML: () => [{ tag: "div[data-object-field]" }],
+  renderHTML: ({ node }) => [
+    "div",
+    { "data-object-field": "", "data-label": String(node.attrs.name) },
+    0,
+  ],
+  addKeyboardShortcuts() {
+    return {
+      Enter: ({ editor }) => leaveField(editor),
+      Tab: ({ editor }) => leaveField(editor),
+    };
+  },
+});
+
 const ObjectBlockView = ({
   node,
   editor,
@@ -138,7 +227,11 @@ const ObjectBlockView = ({
   const id = String(node.attrs.objectId);
   const type = node.attrs.type as ObjectType;
   const collapsed = Boolean(node.attrs.collapsed);
-  const hasBody = node.childCount > 1;
+  let hasBody = false;
+  node.forEach((child) => {
+    if (!["objectTitle", "objectField"].includes(child.type.name))
+      hasBody = true;
+  });
   const pos = getPos();
   const contexts = host.contexts(
     id,
@@ -148,6 +241,7 @@ const ObjectBlockView = ({
     <NodeViewWrapper
       className="pe-object"
       data-type={type}
+      data-color={typeOf(host, type)?.color ?? undefined}
       data-collapsed={collapsed}
       data-done={Boolean(node.attrs.done)}
       // 種別はTitleの行末にタグとして出す。Taskはチェックボックスが種別を示す。
@@ -174,6 +268,7 @@ const ObjectBlockView = ({
             type="button"
             className="pe-context"
             data-type={context.type}
+            data-color={typeOf(host, context.type)?.color ?? undefined}
             onClick={() => host.open(context.id)}
           >
             {context.title}
@@ -224,7 +319,7 @@ const ObjectBlockView = ({
 const ObjectBlock = Node.create({
   name: "objectBlock",
   group: "block",
-  content: "objectTitle block*",
+  content: "objectTitle objectField* block*",
   defining: true,
   addAttributes: () => ({
     objectId: { default: "" },
@@ -284,7 +379,8 @@ const ObjectBlock = Node.create({
             const start = $from.before(depth);
             const body: (typeof object)[] = [];
             object.forEach((child, _offset, index) => {
-              if (index > 0) body.push(child);
+              if (index > 0 && child.type.name !== "objectField")
+                body.push(child);
             });
             tr.replaceWith(start, start + object.nodeSize, [
               state.schema.nodes.paragraph!.create(null, $from.parent.content),
@@ -368,7 +464,12 @@ const atItems = async (
     : []),
 ];
 
-const convertBlock = (editor: Editor, range: Range, type: ObjectType): void => {
+const convertBlock = (
+  editor: Editor,
+  range: Range,
+  type: ObjectType,
+  host: EditorHost,
+): void => {
   editor
     .chain()
     .focus()
@@ -377,14 +478,29 @@ const convertBlock = (editor: Editor, range: Range, type: ObjectType): void => {
       const $pos = tr.selection.$from;
       const block = $pos.parent;
       const depth = $pos.depth;
-      const { objectBlock, objectTitle, paragraph } = state.schema.nodes;
+      const { objectBlock, objectTitle, objectField, objectRef, paragraph } =
+        state.schema.nodes;
       if (block.type !== paragraph || depth < 1) return false;
       const index = $pos.index(depth - 1);
       // リスト項目の先頭段落など、Objectを置けない場所では変換しない。
       if (!$pos.node(depth - 1).canReplaceWith(index, index + 1, objectBlock!))
         return false;
+      // Fieldの行は作成時に並べる。Contextには置かれた場所から継ぐ値を入れる。
+      const fields = (typeOf(host, type)?.fields ?? [CONTEXT_FIELD]).map(
+        (field) =>
+          objectField!.create(
+            { fieldId: field.id, name: field.name },
+            field.kind === "context"
+              ? inheritedAt($pos, host).flatMap((objectId) => [
+                  objectRef!.create({ objectId }),
+                  state.schema.text(" "),
+                ])
+              : null,
+          ),
+      );
       const object = objectBlock!.create({ objectId: newId(), type }, [
         objectTitle!.create(null, block.content),
+        ...fields,
       ]);
       const start = $pos.before(depth);
       tr.replaceWith(start, start + block.nodeSize, [
@@ -402,7 +518,13 @@ const convertBlock = (editor: Editor, range: Range, type: ObjectType): void => {
 /** Tanaと同じく、種別を問わずその場で作る。無い種別は名前を打てば作れる。 */
 const hashItems = (host: EditorHost, query: string): MenuItem[] => {
   const lower = query.toLowerCase();
-  const types = [...CONVERTIBLE, ...host.types()];
+  const types = [
+    ...CONVERTIBLE,
+    ...host
+      .types()
+      .filter((type) => !type.builtin)
+      .map((type) => type.name),
+  ];
   const created = normalizeObjectType(query);
   return [
     ...types
@@ -411,7 +533,7 @@ const hashItems = (host: EditorHost, query: string): MenuItem[] => {
         key: type,
         badge: "#",
         label: `${typeLabel(type)}にする`,
-        run: (editor, range) => convertBlock(editor, range, type),
+        run: (editor, range) => convertBlock(editor, range, type, host),
       })),
     ...(created && !types.some((type) => type.toLowerCase() === lower)
       ? [
@@ -420,7 +542,7 @@ const hashItems = (host: EditorHost, query: string): MenuItem[] => {
             badge: "＋",
             label: `新しい種別「#${created}」にする`,
             run: (editor: Editor, range: Range) =>
-              convertBlock(editor, range, created),
+              convertBlock(editor, range, created, host),
           },
         ]
       : []),
@@ -543,13 +665,15 @@ export const ObjectEditor = ({
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ document: false }),
+      Document,
       UniqueID.configure({
         types: ["paragraph", "heading", "listItem", "objectBlock"],
         generateID: () => newId(),
       }),
       ObjectRef,
       ObjectTitle,
+      ObjectField,
       ObjectBlock,
       createMenus(bridge, hostRef),
     ],
