@@ -57,6 +57,13 @@ DBは既存のVaultとは別のファイルで、既定では`<Vault>/.pkm/objec
 
 確認には、`corepack pnpm --filter @pkm/web build`と`corepack pnpm build`の後に、一時的なVaultを指定して`node apps/server/dist/server-main.js`を起動した。Viteの開発サーバーだけでは`/api/next`へ届かない。
 
+## Object作成の入口（2026-11-12に決定）
+
+- Objectの作成は`#`を主な入口とする。書いた段落をその場でObjectにする。
+- `@`からの新規作成は補助として残す。作ったObjectは参照チップだけを置き、その場へ埋め込むことはしない。
+- AreaやProjectのように置き場所を持たないObjectには、ナビゲーションの「＋」やコマンドパレットなど、文書の外の入口を別に用意する。これは未実装である。
+- Dailyは日付ごとの自由文書で、直接書き込める。その日に作成したObjectの一覧を下に並べる。過去の日付への移動は未実装である。
+
 ## 残した近道と未決事項
 
 - 検索用のTitle文字列は書き込み時点のもので、参照先のTitle変更には追従しない。
