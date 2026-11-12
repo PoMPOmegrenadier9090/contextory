@@ -63,6 +63,10 @@
 }
 
 /* type colors */
+.od-demo [data-type] {
+  --od-type: var(--od-muted);
+  --od-type-soft: var(--od-subtle);
+}
 .od-demo [data-type="task"] {
   --od-type: var(--od-task);
   --od-type-soft: var(--od-task-soft);

@@ -8,7 +8,7 @@ import {
   type ObjectTimelineEntry,
   type ObjectType,
 } from "@pkm/core";
-import { ObjectEditor, TYPE_LABEL, type EditorHost } from "@pkm/editor";
+import { ObjectEditor, typeLabel, type EditorHost } from "@pkm/editor";
 import { useEffect, useRef, useState } from "react";
 
 const MINUTE = 60_000;
@@ -24,6 +24,7 @@ const isDaily = (hostId: string): boolean => hostId.startsWith("daily:");
 interface Overview {
   readonly navigation: readonly ObjectSummary[];
   readonly recent: readonly ObjectSummary[];
+  readonly types: readonly string[];
 }
 
 const api = async <T,>(
@@ -197,6 +198,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
   const [overview, setOverview] = useState<Overview>({
     navigation: [],
     recent: [],
+    types: [],
   });
   const [filter, setFilter] = useState<TimelineFilter>("all");
   /** "saved"、"saving"、または失敗の理由 */
@@ -323,6 +325,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
 
   const host: EditorHost = {
     lookup: (id) => objects[id],
+    types: () => overview.types,
     search: (query) =>
       api<ObjectSummary[]>(
         "GET",
@@ -361,7 +364,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     note: string,
   ): React.JSX.Element => (
     <li className="od-row" data-type={object.type} key={object.id}>
-      <span className="od-type">{TYPE_LABEL[object.type]}</span>
+      <span className="od-type">{typeLabel(object.type)}</span>
       <button type="button" onClick={() => open(object.id)}>
         <strong>{object.title}</strong>
         {note ? <small>{note}</small> : null}
@@ -497,7 +500,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
         <main className="od-main">
           {current ? (
             <header className="od-page-header" data-type={current.type}>
-              <span className="od-type">{TYPE_LABEL[current.type]}</span>
+              <span className="od-type">{typeLabel(current.type)}</span>
               <input
                 className="od-page-title"
                 aria-label="Title"
@@ -540,7 +543,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                       data-type={objects[id]?.type}
                     >
                       <button type="button" onClick={() => open(id)}>
-                        <small>{TYPE_LABEL[objects[id]?.type ?? "memo"]}</small>
+                        <small>{typeLabel(objects[id]?.type ?? "memo")}</small>
                         {objects[id]?.title ?? "削除されたObject"}
                       </button>
                       <button
@@ -576,7 +579,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                     <option value="">＋ Context</option>
                     {contextCandidates.map((o) => (
                       <option key={o.id} value={o.id}>
-                        {TYPE_LABEL[o.type]} · {o.title}
+                        {typeLabel(o.type)} · {o.title}
                       </option>
                     ))}
                   </select>

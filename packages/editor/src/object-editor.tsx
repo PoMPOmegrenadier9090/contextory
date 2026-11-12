@@ -27,7 +27,12 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { newId, type DocNode, type ObjectType } from "@pkm/core";
+import {
+  newId,
+  normalizeObjectType,
+  type DocNode,
+  type ObjectType,
+} from "@pkm/core";
 
 /** エディタが表示に使うObjectの情報。 */
 export interface EditorObject {
@@ -47,6 +52,8 @@ export interface EditorHost {
     parentId: string | null,
   ) => string;
   readonly open: (id: string) => void;
+  /** ユーザーが作った種別の名前。 */
+  readonly types: () => readonly string[];
   /** 置かれた場所から自明でないContext。 */
   readonly contexts: (
     id: string,
@@ -54,13 +61,15 @@ export interface EditorHost {
   ) => readonly EditorObject[];
 }
 
-export const TYPE_LABEL: Record<ObjectType, string> = {
+const TYPE_LABEL: Record<string, string> = {
   area: "Area",
   project: "Project",
   task: "Task",
   decision: "Decision",
   memo: "Memo",
 };
+/** 表示用の種別名。ユーザーが作った種別は名前をそのまま使う。 */
+export const typeLabel = (type: ObjectType): string => TYPE_LABEL[type] ?? type;
 
 const HostContext = createContext<EditorHost | null>(null);
 const useHost = (): EditorHost => {
@@ -143,7 +152,8 @@ const ObjectBlockView = ({
       data-done={Boolean(node.attrs.done)}
       // 種別はTitleの行末にタグとして出す。Taskはチェックボックスが種別を示す。
       style={{
-        "--pe-tag": type === "task" ? '""' : `"#${TYPE_LABEL[type]}"`,
+        "--pe-tag":
+          type === "task" ? '""' : JSON.stringify(`#${typeLabel(type)}`),
       }}
     >
       {type === "task" ? (
@@ -313,7 +323,7 @@ interface MenuBridge {
 }
 
 const CREATABLE: readonly ObjectType[] = ["task", "project", "decision"];
-/** #で段落から作れる種別。Tanaと同じく、種別を問わずその場で作る。 */
+/** #のメニューに出す組み込みの種別の並び。 */
 const CONVERTIBLE: readonly ObjectType[] = [
   "task",
   "decision",
@@ -339,7 +349,7 @@ const atItems = async (
 ): Promise<MenuItem[]> => [
   ...(await host.search(query)).map<MenuItem>((info) => ({
     key: info.id,
-    badge: TYPE_LABEL[info.type],
+    badge: typeLabel(info.type),
     label: info.title,
     run: (editor, range) => insertRef(editor, range, info.id),
   })),
@@ -347,7 +357,7 @@ const atItems = async (
     ? CREATABLE.map<MenuItem>((type) => ({
         key: `new-${type}`,
         badge: "＋",
-        label: `新規${TYPE_LABEL[type]}「${query}」`,
+        label: `新規${typeLabel(type)}「${query}」`,
         run: (editor, range) =>
           insertRef(
             editor,
@@ -389,15 +399,33 @@ const convertBlock = (editor: Editor, range: Range, type: ObjectType): void => {
     .run();
 };
 
-const hashItems = (query: string): MenuItem[] =>
-  CONVERTIBLE.filter((type) => type.startsWith(query.toLowerCase())).map(
-    (type) => ({
-      key: type,
-      badge: "#",
-      label: `${TYPE_LABEL[type]}にする`,
-      run: (editor, range) => convertBlock(editor, range, type),
-    }),
-  );
+/** Tanaと同じく、種別を問わずその場で作る。無い種別は名前を打てば作れる。 */
+const hashItems = (host: EditorHost, query: string): MenuItem[] => {
+  const lower = query.toLowerCase();
+  const types = [...CONVERTIBLE, ...host.types()];
+  const created = normalizeObjectType(query);
+  return [
+    ...types
+      .filter((type) => type.toLowerCase().startsWith(lower))
+      .map<MenuItem>((type) => ({
+        key: type,
+        badge: "#",
+        label: `${typeLabel(type)}にする`,
+        run: (editor, range) => convertBlock(editor, range, type),
+      })),
+    ...(created && !types.some((type) => type.toLowerCase() === lower)
+      ? [
+          {
+            key: "new-type",
+            badge: "＋",
+            label: `新しい種別「#${created}」にする`,
+            run: (editor: Editor, range: Range) =>
+              convertBlock(editor, range, created),
+          },
+        ]
+      : []),
+  ];
+};
 
 const createMenus = (
   bridge: MenuBridge,
@@ -449,7 +477,7 @@ const createMenus = (
           ...common,
           char: "#",
           pluginKey: new PluginKey("hashMenu"),
-          items: ({ query }) => hashItems(query),
+          items: ({ query }) => hashItems(host.current, query),
           render: render("このBlockをObjectにする"),
         }),
       ];

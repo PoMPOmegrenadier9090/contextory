@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { DocNode, ObjectRecord } from "@pkm/core";
+import {
+  normalizeObjectType,
+  type DocNode,
+  type ObjectRecord,
+} from "@pkm/core";
 import { ObjectStore, ObjectStoreError } from "./object-store.js";
 
 const text = (value: string): DocNode => ({ type: "text", text: value });
@@ -146,6 +150,16 @@ describe("ObjectStore", () => {
     expect(store.search("検索", null).map((o) => o.id)).toEqual(["x"]);
     expect(store.search("", "x").map((o) => o.id)).not.toContain("memo");
     expect(store.overview(50).recent.map((o) => o.id)).toEqual(["x"]);
+  });
+
+  it("keeps user-defined types and lists them", () => {
+    expect(normalizeObjectType(" Task ")).toBe("task");
+    expect(normalizeObjectType("会議")).toBe("会議");
+    expect(normalizeObjectType("a b")).toBeNull();
+    expect(normalizeObjectType("")).toBeNull();
+    const page = store.savePage(DAILY, doc(block("mtg", "会議", "定例")), 10);
+    expect(page.objects.mtg?.type).toBe("会議");
+    expect(store.overview(0).types).toEqual(["会議"]);
   });
 
   it("refuses contexts that would create a cycle and unknown hosts", () => {

@@ -7,6 +7,7 @@ import {
   inheritedContexts,
   inlineText,
   joinDocument,
+  normalizeObjectType,
   OBJECT_TYPES,
   refIds,
   splitDocument,
@@ -356,10 +357,9 @@ export class ObjectStore {
         // 親も今回初めて現れた場合に備え、親から先に作る。
         if (parentId !== null && parentId !== hostId) ensure(parentId);
         const isNew = !this.row(id);
-        const type = OBJECT_TYPES.find((t) => t === content.attrs.type);
         this.upsertObject(
           id,
-          type ?? "task",
+          normalizeObjectType(content.attrs.type) ?? "task",
           content.title,
           content.body,
           Boolean(content.attrs.done),
@@ -502,10 +502,11 @@ export class ObjectStore {
     return rows.map((row) => this.summary(row));
   }
 
-  /** 画面の入口に出すObjectと、since以降に作成したObject。 */
+  /** 画面の入口に出すObject、since以降に作成したObject、ユーザーが作った種別。 */
   overview(since: number): {
     readonly navigation: ObjectSummary[];
     readonly recent: ObjectSummary[];
+    readonly types: string[];
   } {
     const select = (where: string, ...params: unknown[]): ObjectSummary[] =>
       (
@@ -516,6 +517,14 @@ export class ObjectStore {
     return {
       navigation: select("type IN ('area', 'project') ORDER BY created_at"),
       recent: select("created_at >= ? ORDER BY created_at DESC", since),
+      // 種別の定義はまだ持たず、使われている名前をそのまま種別とみなす。
+      types: (
+        this.database
+          .prepare(
+            `SELECT DISTINCT type FROM objects WHERE type NOT IN (${OBJECT_TYPES.map(() => "?").join()}) ORDER BY type`,
+          )
+          .all(...OBJECT_TYPES) as { type: string }[]
+      ).map((row) => row.type),
     };
   }
 

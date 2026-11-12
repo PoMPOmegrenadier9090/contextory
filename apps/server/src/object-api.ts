@@ -1,5 +1,5 @@
 import {
-  OBJECT_TYPES,
+  normalizeObjectType,
   requireRequestRecord as requireRecord,
   requireRequestString as requireString,
   type DocNode,
@@ -17,8 +17,8 @@ const requireNodes = (value: unknown, name: string): readonly DocNode[] => {
 };
 
 const requireType = (value: unknown): ObjectRecord["type"] => {
-  const type = OBJECT_TYPES.find((candidate) => candidate === value);
-  if (!type) throw new TypeError("type is not a known object type");
+  const type = normalizeObjectType(value);
+  if (!type) throw new TypeError("type is not a valid object type");
   return type;
 };
 

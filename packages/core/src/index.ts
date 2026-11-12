@@ -162,7 +162,12 @@ export type {
   ObjectContent,
   SplitResult,
 } from "./object-document.js";
-export { inheritedContexts, inlineText, OBJECT_TYPES } from "./object-model.js";
+export {
+  inheritedContexts,
+  inlineText,
+  normalizeObjectType,
+  OBJECT_TYPES,
+} from "./object-model.js";
 export type {
   ObjectPage,
   ObjectRecord,

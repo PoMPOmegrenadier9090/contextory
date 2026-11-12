@@ -119,7 +119,7 @@ describe("object API", () => {
         await app.inject({
           method: "POST",
           url: "/api/next/objects",
-          payload: { id: "x", type: "unknown" },
+          payload: { id: "x", type: "not a type" },
         })
       ).statusCode,
     ).toBe(400);

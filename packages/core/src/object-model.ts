@@ -1,5 +1,6 @@
 import type { DocNode } from "./object-document.js";
 
+/** 組み込みの種別。チェックボックスやContextの継承など、固有の振る舞いを持つ。 */
 export const OBJECT_TYPES = [
   "area",
   "project",
@@ -7,7 +8,18 @@ export const OBJECT_TYPES = [
   "decision",
   "memo",
 ] as const;
-export type ObjectType = (typeof OBJECT_TYPES)[number];
+/** 組み込みの種別か、ユーザーが#で作った種別の名前。 */
+export type ObjectType = string;
+
+/** 種別として使える名前に整える。使えなければnull。 */
+export const normalizeObjectType = (value: unknown): ObjectType | null => {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return (
+    OBJECT_TYPES.find((type) => type === name.toLowerCase()) ??
+    (/^[^\s#@]{1,40}$/u.test(name) ? name : null)
+  );
+};
 
 /** Objectは独立した本文を持ち、文書には埋め込みBlockとして置かれる。 */
 export interface ObjectRecord {
