@@ -15,7 +15,7 @@ import { registerDesktopIpc } from "./electron-ipc.js";
 import { registerDesktopLifecycle } from "./electron-lifecycle.js";
 import { DesktopVaultController } from "./vault-controller.js";
 import { externalWebUrl } from "./external-link.js";
-import { openLocalVault } from "@pkm/storage-node";
+import { ObjectStore, openLocalVault } from "@pkm/storage-node";
 import { FileVaultPreferences } from "./vault-preferences.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
@@ -43,13 +43,6 @@ const controller = new DesktopVaultController(
         )
     : undefined,
 );
-const unregisterIpc = registerDesktopIpc(controller, (channel, payload) => {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed() && !window.webContents.isDestroyed())
-      window.webContents.send(channel, payload);
-  }
-});
-
 const refreshVault = (): void => {
   void controller.api.refreshVault().catch((error: unknown) => {
     console.error("Vault refresh failed", error);
@@ -101,6 +94,21 @@ const createWindow = async (): Promise<BrowserWindow> => {
 };
 
 await app.whenReady();
+const objects = new ObjectStore(
+  process.env.PKM_ELECTRON_SMOKE === "1"
+    ? ":memory:"
+    : join(app.getPath("userData"), "objects.sqlite"),
+);
+const unregisterIpc = registerDesktopIpc(
+  controller,
+  objects,
+  (channel, payload) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed())
+        window.webContents.send(channel, payload);
+    }
+  },
+);
 powerMonitor.on("resume", refreshVault);
 protocol.handle("pkm-asset", async (request) => {
   const url = new URL(request.url);
@@ -119,7 +127,14 @@ protocol.handle("pkm-asset", async (request) => {
     return new Response(null, { status: 404 });
   }
 });
-registerDesktopLifecycle(createWindow, () => controller.close(), unregisterIpc);
+registerDesktopLifecycle(
+  createWindow,
+  async () => {
+    await controller.close();
+    objects.close();
+  },
+  unregisterIpc,
+);
 const mainWindow = await createWindow();
 if (process.env.PKM_ELECTRON_SMOKE === "1") {
   const result = (await mainWindow.webContents.executeJavaScript(
@@ -129,15 +144,17 @@ if (process.env.PKM_ELECTRON_SMOKE === "1") {
         root: document.querySelector('#root') !== null,
         rendered: document.querySelector('#root')?.childElementCount > 0,
         title: document.title,
-        chooseVaultButton: [...document.querySelectorAll('button')]
-          .some((button) => button.textContent?.includes('Vaultを選択')),
+        dailyButton: [...document.querySelectorAll('button')]
+          .some((button) => button.textContent === 'Daily'),
         methods: [
           'chooseVault', 'restoreVault', 'syncStatus', 'setupSync', 'listEntities', 'listTodos', 'toggleTodo', 'quickOpen', 'searchEntities', 'createEntity',
           'createAsset', 'openAsset', 'readImage', 'listUnresolvedReferences',
           'loadEntity', 'saveDraft', 'saveEntity', 'permanentlyDeleteEntity', 'resolveEntityConflict',
           'listSyncthingConflicts', 'loadSyncthingConflict',
           'resolveSyncthingConflict',
-          'onVaultChanged'
+          'onVaultChanged', 'loadPage', 'savePage', 'searchObjects',
+          'objectsOfType', 'createObject', 'patchObject', 'timeline',
+          'types', 'updateType', 'overview'
         ].every((name) => typeof window.pkm?.[name] === 'function')
       });
       const initial = inspect();
@@ -163,7 +180,7 @@ if (process.env.PKM_ELECTRON_SMOKE === "1") {
     readonly root: boolean;
     readonly rendered: boolean;
     readonly title: string;
-    readonly chooseVaultButton: boolean;
+    readonly dailyButton: boolean;
     readonly methods: boolean;
   };
   if (
@@ -172,7 +189,7 @@ if (process.env.PKM_ELECTRON_SMOKE === "1") {
     !result.root ||
     !result.rendered ||
     result.title !== "Contextory" ||
-    !result.chooseVaultButton ||
+    !result.dailyButton ||
     !result.methods
   ) {
     throw new Error(

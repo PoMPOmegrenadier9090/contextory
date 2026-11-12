@@ -7,6 +7,10 @@
     "rootDir": "src",
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
-  "references": [{ "path": "../contracts" }, { "path": "../core" }],
+  "references": [
+    { "path": "../contracts" },
+    { "path": "../core" },
+    { "path": "../editor" }
+  ],
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

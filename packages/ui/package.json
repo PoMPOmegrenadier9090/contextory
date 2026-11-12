@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./object-app": {
+      "types": "./dist/object-app.d.ts",
+      "default": "./dist/object-app.js"
     }
   },
   "dependencies": {
@@ -21,6 +25,7 @@
     "@mantine/core": "^9.6.2",
     "@pkm/contracts": "workspace:*",
     "@pkm/core": "workspace:*",
+    "@pkm/editor": "workspace:*",
     "codemirror-live-markdown": "0.5.1-alpha.1",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "katex": "^0.16.47",

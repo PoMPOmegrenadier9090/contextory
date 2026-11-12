@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { ObjectApp } from "@pkm/ui/object-app";
 
 import { createHttpObjectClient } from "./object-client.js";
-import { ObjectApp } from "./object-document-demo.js";
-import "./object-document-demo.css";
+import "../../../packages/ui/src/object-app.css";
 import "../../../packages/editor/src/editor.css";
 
 const root = document.querySelector<HTMLDivElement>("#root");

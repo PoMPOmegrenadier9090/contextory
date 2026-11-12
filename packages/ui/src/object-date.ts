@@ -1,4 +1,4 @@
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DAILY_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const localDate = (date = new Date()): string => {
   const pad = (value: number): string => String(value).padStart(2, "0");
@@ -9,7 +9,7 @@ export const dailyHostId = (date = localDate()): string => `daily:${date}`;
 
 export const dailyDate = (hostId: string): string | null => {
   const date = hostId.startsWith("daily:") ? hostId.slice(6) : "";
-  return DATE.test(date) ? date : null;
+  return DAILY_DATE.test(date) ? date : null;
 };
 
 export const shiftDate = (date: string, days: number): string => {

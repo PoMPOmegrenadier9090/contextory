@@ -4,6 +4,13 @@ import type { EntityPage, EntityCounts, CalendarCount } from "@pkm/contracts";
 import { contextBridge, ipcRenderer } from "electron";
 import type { PkmQuickOpenResult, TodoPage } from "@pkm/contracts";
 import type {
+  ObjectOverview,
+  ObjectPage,
+  ObjectSummary,
+  ObjectTimelineEntry,
+  TypeDefinition,
+} from "@pkm/core";
+import type {
   CreateEntityRequest,
   CreateVaultAssetRequest,
   EntityDocument,
@@ -150,6 +157,33 @@ const api: DesktopApi = {
       DESKTOP_IPC_CHANNELS.resolveSyncthingConflict,
       request,
     ),
+  loadPage: (hostId) =>
+    invoke<ObjectPage>(DESKTOP_IPC_CHANNELS.objectLoadPage, hostId),
+  savePage: (hostId, doc) =>
+    invoke<ObjectPage>(DESKTOP_IPC_CHANNELS.objectSavePage, hostId, { doc }),
+  searchObjects: (query, exclude = null) =>
+    invoke<readonly ObjectSummary[]>(
+      DESKTOP_IPC_CHANNELS.objectSearch,
+      query,
+      exclude,
+    ),
+  objectsOfType: (type) =>
+    invoke<readonly ObjectSummary[]>(DESKTOP_IPC_CHANNELS.objectListType, type),
+  createObject: (input) =>
+    invoke<ObjectSummary>(DESKTOP_IPC_CHANNELS.objectCreate, input),
+  patchObject: (id, patch) =>
+    invoke<ObjectSummary>(DESKTOP_IPC_CHANNELS.objectPatch, id, patch),
+  timeline: (id) =>
+    invoke<readonly ObjectTimelineEntry[]>(
+      DESKTOP_IPC_CHANNELS.objectTimeline,
+      id,
+    ),
+  types: () =>
+    invoke<readonly TypeDefinition[]>(DESKTOP_IPC_CHANNELS.objectTypes),
+  updateType: (name, patch) =>
+    invoke<TypeDefinition>(DESKTOP_IPC_CHANNELS.objectUpdateType, name, patch),
+  overview: (from, to) =>
+    invoke<ObjectOverview>(DESKTOP_IPC_CHANNELS.objectOverview, { from, to }),
   onVaultChanged: (listener) => {
     if (vaultChangedListener !== null) {
       ipcRenderer.removeListener(

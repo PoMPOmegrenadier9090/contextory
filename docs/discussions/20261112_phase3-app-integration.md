@@ -8,7 +8,7 @@ Phase 3のアプリ統合では、ObjectStoreのSQLiteを正本とする。既�
 
 ブラウザーやElectronのrendererはSQLiteを直接開かず、ObjectClientの操作を通じて読み書きする。Webでは`apps/server`がObjectStoreを開き、HTTP APIを提供する。サーバーをローカルで動かす場合も構成は同じで、正本は`PKM_SERVER_DATA_DIR/objects.sqlite`に置く。
 
-Desktopをローカルだけで使う場合は、ElectronのmainプロセスがObjectStoreを開き、rendererへIPCを提供する。外部のサーバーを別に起動する必要はない。この接続はWeb統合の次に実装する。
+Desktopをローカルだけで使う場合は、ElectronのmainプロセスがObjectStoreを開き、rendererへIPCを提供する。正本はアプリのuserDataにある`objects.sqlite`で、外部のサーバーを別に起動する必要はない。Electronのsmokeでは利用中のDBへ触れないよう、メモリ上のObjectStoreを使う。
 
 SQLiteファイルをSyncthingで端末間同期する方法は採らない。複数端末から使う構成では、一つのサーバーがObjectStoreを開き、各端末がそのAPIへ接続する。サーバーの設置と認証はPhase 3の今回の範囲に含めない。
 
@@ -30,6 +30,6 @@ Webの通常の起動入口をObject画面へ切り替えた。既存のMarkdown
 
 保存は0.4秒分の入力をまとめ、書き込みを一列に並べる。画面を閉じる時は未送信の文書をkeepalive付きで送る。作成、本文保存、画面の再取得は同じ列を使うため、文書外でObjectを作った直後にそのページを開いても順序が入れ替わらない。
 
-## 次はDesktopを同じ画面へ接続する
+## Desktopも同じObject画面を使う
 
-次の区切りでは、DesktopのmainプロセスでObjectStoreを開き、ObjectClientと同じ操作をIPCへ追加する。rendererはWebと同じObject画面を使う。その後、既存Vaultの取り込み、Quick Capture、MCPツールの順に接続する。
+DesktopのmainプロセスにObjectClientと同じ操作をIPCとして追加し、HTTP APIと共通の入力検証を通す。rendererはWebと同じObject画面を使う。次は既存Vaultの取り込み、Quick Capture、MCPツールの順に接続する。

@@ -5,6 +5,7 @@ body,
   margin: 0;
 }
 
+/* WebとDesktopで共有するObject画面。 */
 .od-demo {
   --od-bg: #f3f1ec;
   --od-surface: #fffefa;

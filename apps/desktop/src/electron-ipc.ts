@@ -1,4 +1,12 @@
-import { parseEntityPageQuery, parseBacklinkPageQuery } from "@pkm/core";
+import {
+  parseBacklinkPageQuery,
+  parseEntityPageQuery,
+  parseObjectCreate,
+  parseObjectOverviewRange,
+  parseObjectPageSave,
+  parseObjectPatch,
+  parseObjectTypePatch,
+} from "@pkm/core";
 import { ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { parseTodoQuery, parseToggleTodoRequest } from "@pkm/core";
 
@@ -15,6 +23,7 @@ import {
   parsePermanentlyDeleteEntityRequest,
   requireRequestString,
 } from "@pkm/core";
+import type { ObjectStore } from "@pkm/storage-node";
 import type { DesktopVaultController } from "./vault-controller.js";
 import {
   parseDesktopSyncConnection,
@@ -25,6 +34,7 @@ export type DesktopEventSender = (channel: string, payload: unknown) => void;
 
 export const registerDesktopIpc = (
   controller: DesktopVaultController,
+  objects: ObjectStore,
   sendEvent: DesktopEventSender = () => undefined,
 ): (() => void) => {
   const channels = Object.values(DESKTOP_IPC_CHANNELS);
@@ -219,6 +229,59 @@ export const registerDesktopIpc = (
         parseResolveSyncthingConflictRequest(request),
       ),
   );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectLoadPage, (_event, hostId) =>
+    objects.loadPage(requireRequestString(hostId, "hostId")),
+  );
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.objectSavePage,
+    (_event, hostId, request) =>
+      objects.savePage(
+        requireRequestString(hostId, "hostId"),
+        parseObjectPageSave(request),
+        Date.now(),
+      ),
+  );
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.objectSearch,
+    (_event, query: unknown, exclude: unknown) => {
+      if (typeof query !== "string")
+        throw new TypeError("query must be a string");
+      const excluded =
+        exclude === null || exclude === undefined
+          ? null
+          : requireRequestString(exclude, "exclude");
+      return objects.search(query, excluded);
+    },
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectListType, (_event, type) =>
+    objects.objectsOfType(requireRequestString(type, "type")),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectCreate, (_event, request) =>
+    objects.createObject(parseObjectCreate(request), Date.now()),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectPatch, (_event, id, request) =>
+    objects.patchObject(
+      requireRequestString(id, "id"),
+      parseObjectPatch(request),
+      Date.now(),
+    ),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTimeline, (_event, id) =>
+    objects.timeline(requireRequestString(id, "id")),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTypes, () => objects.types());
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.objectUpdateType,
+    (_event, name, request) =>
+      objects.updateType(
+        requireRequestString(name, "name"),
+        parseObjectTypePatch(request),
+      ),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectOverview, (_event, request) => {
+    const { from, to } = parseObjectOverviewRange(request);
+    return objects.overview(from, to);
+  });
   const unsubscribe = controller.onVaultChanged((result) => {
     sendEvent(DESKTOP_IPC_CHANNELS.vaultChanged, result);
   });

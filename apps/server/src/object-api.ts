@@ -1,9 +1,13 @@
 import {
   normalizeObjectType,
+  parseObjectCreate,
+  parseObjectOverviewRange,
+  parseObjectPageSave,
+  parseObjectPatch,
+  parseObjectTypePatch,
   requireRequestRecord as requireRecord,
   requireRequestString as requireString,
   type DocNode,
-  type FieldKind,
   type ObjectRecord,
 } from "@pkm/core";
 import type { ObjectStore } from "@pkm/storage-node";
@@ -31,11 +35,13 @@ export const registerObjectRoutes = (
   app.get("/api/next/pages/:hostId", (request) =>
     store.loadPage(param(request.params, "hostId")),
   );
-  app.put("/api/next/pages/:hostId", (request) => {
-    const doc = requireRecord(requireRecord(request.body).doc);
-    if (doc.type !== "doc") throw new TypeError("doc must be a document node");
-    return store.savePage(param(request.params, "hostId"), doc, Date.now());
-  });
+  app.put("/api/next/pages/:hostId", (request) =>
+    store.savePage(
+      param(request.params, "hostId"),
+      parseObjectPageSave(request.body),
+      Date.now(),
+    ),
+  );
 
   app.get("/api/next/objects", (request) => {
     const query = requireRecord(request.query);
@@ -46,35 +52,20 @@ export const registerObjectRoutes = (
     );
   });
   app.post("/api/next/objects", (request, reply) => {
-    const body = requireRecord(request.body);
-    const parentId = body.parentId ?? null;
-    return reply.code(201).send(
-      store.createObject(
-        {
-          id: requireString(body.id, "id"),
-          type: requireType(body.type),
-          title: typeof body.title === "string" ? body.title : "",
-          parentId:
-            parentId === null ? null : requireString(parentId, "parentId"),
-        },
-        Date.now(),
-      ),
-    );
+    return reply
+      .code(201)
+      .send(store.createObject(parseObjectCreate(request.body), Date.now()));
   });
   app.get("/api/next/objects/:id", (request) =>
     store.getObject(param(request.params, "id")),
   );
-  app.patch("/api/next/objects/:id", (request) => {
-    const body = requireRecord(request.body);
-    return store.patchObject(
+  app.patch("/api/next/objects/:id", (request) =>
+    store.patchObject(
       param(request.params, "id"),
-      {
-        ...(typeof body.title === "string" ? { title: body.title } : {}),
-        ...(typeof body.done === "boolean" ? { done: body.done } : {}),
-      },
+      parseObjectPatch(request.body),
       Date.now(),
-    );
-  });
+    ),
+  );
   app.put("/api/next/objects/:id/contexts/:targetId", (request) =>
     store.addContext(
       param(request.params, "id"),
@@ -92,47 +83,15 @@ export const registerObjectRoutes = (
   );
 
   app.get("/api/next/types", () => store.types());
-  app.patch("/api/next/types/:name", (request) => {
-    const body = requireRecord(request.body);
-    return store.updateType(param(request.params, "name"), {
-      ...(typeof body.name === "string" ? { name: body.name } : {}),
-      ...(typeof body.color === "string" || body.color === null
-        ? { color: body.color }
-        : {}),
-      ...(typeof body.checkbox === "boolean"
-        ? { checkbox: body.checkbox }
-        : {}),
-      ...(typeof body.extends === "string" || body.extends === null
-        ? { extends: body.extends }
-        : {}),
-      ...(Array.isArray(body.fields)
-        ? {
-            fields: (body.fields as unknown[]).map((value) => {
-              const field = requireRecord(value);
-              return {
-                id: requireString(field.id, "id"),
-                name: requireString(field.name, "name"),
-                kind: requireString(field.kind, "kind") as FieldKind,
-                ...(Array.isArray(field.options)
-                  ? {
-                      options: (field.options as unknown[]).map((option) =>
-                        requireString(option, "option"),
-                      ),
-                    }
-                  : {}),
-              };
-            }),
-          }
-        : {}),
-    });
-  });
+  app.patch("/api/next/types/:name", (request) =>
+    store.updateType(
+      param(request.params, "name"),
+      parseObjectTypePatch(request.body),
+    ),
+  );
 
   app.get("/api/next/overview", (request) => {
-    const query = requireRecord(request.query);
-    const from = Number(query.from ?? 0);
-    const to = Number(query.to ?? Number.MAX_SAFE_INTEGER);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to)
-      throw new TypeError("from and to must be a valid range");
+    const { from, to } = parseObjectOverviewRange(request.query);
     return store.overview(from, to);
   });
 

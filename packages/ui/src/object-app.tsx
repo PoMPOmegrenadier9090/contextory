@@ -50,7 +50,7 @@ const KIND_LABEL = {
   select: "選択",
 } as const;
 
-/** 種別のページ。名前・色・Fieldをここで定義する。 */
+/** 種別のページ。名前・色・Fieldを定義する。 */
 const TypePage = ({
   definition,
   others,

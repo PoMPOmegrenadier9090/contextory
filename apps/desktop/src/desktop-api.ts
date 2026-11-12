@@ -7,7 +7,7 @@ import type {
   ResolveEntityConflictRequest,
   PkmResolveConflictResult,
 } from "@pkm/contracts";
-import type { VaultAccessMode } from "@pkm/core";
+import type { ObjectClient, VaultAccessMode } from "@pkm/core";
 import type { VaultAssetContent } from "@pkm/storage-node";
 import type {
   SyncthingStatus,
@@ -48,10 +48,10 @@ export interface DesktopVaultOperations extends Omit<
   ): Promise<PkmResolveConflictResult>;
 }
 
-export interface DesktopApi extends Omit<
-  DesktopVaultOperations,
-  "readAsset" | "assetAbsolutePath"
-> {
+export interface DesktopApi
+  extends
+    Omit<DesktopVaultOperations, "readAsset" | "assetAbsolutePath">,
+    ObjectClient {
   openAsset(path: string): Promise<void>;
   readImage(path: string): Promise<{ mimeType: string; dataBase64: string }>;
   onVaultChanged(listener: (result: PkmIndexSyncResult) => void): void;

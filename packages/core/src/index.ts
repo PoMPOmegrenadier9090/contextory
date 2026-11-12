@@ -188,3 +188,10 @@ export type {
   ObjectOverview,
   ObjectTypePatch,
 } from "./object-client.js";
+export {
+  parseObjectCreate,
+  parseObjectOverviewRange,
+  parseObjectPageSave,
+  parseObjectPatch,
+  parseObjectTypePatch,
+} from "./object-request-validation.js";

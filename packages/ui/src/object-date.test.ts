@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { dailyDate, dailyHostId, dateRange, shiftDate } from "./object-date.js";
 
-describe("Object Daily dates", () => {
+describe("Object Daily date helpers", () => {
   it("round-trips Daily host IDs", () => {
     expect(dailyDate(dailyHostId("2026-11-12"))).toBe("2026-11-12");
     expect(dailyDate("project")).toBeNull();
