@@ -516,7 +516,7 @@ export interface OpenServerAppOptions extends BuildServerAppOptions {
   readonly mcp?: McpHostOptions;
   readonly vault?: OpenLocalVaultOptions;
   readonly webRoot?: string;
-  /** 次期Object保存層のDB。省略時はVaultの.pkm配下に置く。 */
+  /** Object正本のDB。テストで省略した時だけVaultの.pkm配下に置く。 */
   readonly objectStorePath?: string;
 }
 

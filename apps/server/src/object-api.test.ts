@@ -110,6 +110,13 @@ describe("object API", () => {
     expect(
       (await second.inject({ url: "/api/next/objects?type=task" })).json(),
     ).toMatchObject([{ id: "task" }]);
+    expect(
+      (
+        await second.inject({
+          url: "/api/next/overview?from=0&to=1",
+        })
+      ).json(),
+    ).toMatchObject({ recent: [] });
     const timeline = (
       await second.inject({ url: "/api/next/objects/project/timeline" })
     ).json<ObjectTimelineEntry[]>();

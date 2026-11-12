@@ -1,0 +1,35 @@
+# Phase 3ではSQLiteを正本とし、既存のMarkdown画面を置き換える
+
+記録日: 2026-11-12
+
+Phase 3のアプリ統合では、ObjectStoreのSQLiteを正本とする。既存のMarkdownを前提とした画面は新しいObject画面へ置き換え、二重書き込みや後方互換のための画面は残さない。この記録では、ローカルだけで使う場合の構成と、最初にWebへ組み込んだ範囲を示す。
+
+## 正本はObjectStoreを開いたプロセスが管理する
+
+ブラウザーやElectronのrendererはSQLiteを直接開かず、ObjectClientの操作を通じて読み書きする。Webでは`apps/server`がObjectStoreを開き、HTTP APIを提供する。サーバーをローカルで動かす場合も構成は同じで、正本は`PKM_SERVER_DATA_DIR/objects.sqlite`に置く。
+
+Desktopをローカルだけで使う場合は、ElectronのmainプロセスがObjectStoreを開き、rendererへIPCを提供する。外部のサーバーを別に起動する必要はない。この接続はWeb統合の次に実装する。
+
+SQLiteファイルをSyncthingで端末間同期する方法は採らない。複数端末から使う構成では、一つのサーバーがObjectStoreを開き、各端末がそのAPIへ接続する。サーバーの設置と認証はPhase 3の今回の範囲に含めない。
+
+## 既存画面と新しい画面は併存させない
+
+Webの通常の起動入口をObject画面へ切り替えた。既存のMarkdown Entity画面との切り替え、同じ内容の二重保存、Markdown側への書き戻しは行わない。既存VaultをObjectへ変換する処理は別の段階で実装し、元のMarkdownファイルには触れない。
+
+## Webは空のDBからDailyを開始できる
+
+試作用データの自動投入とリセットを外した。空のObjectStoreを開くと当日のDailyが表示され、直接入力できる。
+
+今回のWeb統合では、次の操作を本体画面へ追加した。
+
+- 日付の入力、前日・翌日・今日のボタンによるDailyの移動
+- 選択した日に作成したObjectの一覧
+- ナビゲーション外側の「＋ Object」からのObject作成
+- WebとDesktopで共有するObjectClientの操作契約
+- Objectの作成日を`from`以上`to`未満で取得するoverview API
+
+保存は0.4秒分の入力をまとめ、書き込みを一列に並べる。画面を閉じる時は未送信の文書をkeepalive付きで送る。作成、本文保存、画面の再取得は同じ列を使うため、文書外でObjectを作った直後にそのページを開いても順序が入れ替わらない。
+
+## 次はDesktopを同じ画面へ接続する
+
+次の区切りでは、DesktopのmainプロセスでObjectStoreを開き、ObjectClientと同じ操作をIPCへ追加する。rendererはWebと同じObject画面を使う。その後、既存Vaultの取り込み、Quick Capture、MCPツールの順に接続する。

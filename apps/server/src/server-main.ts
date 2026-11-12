@@ -17,13 +17,13 @@ if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) {
 }
 
 const webRoot = fileURLToPath(new URL("../../web/dist-web/", import.meta.url));
-const mcp = mcpOptionsFromEnvironment(
-  process.env,
-  process.env.PKM_SERVER_DATA_DIR ?? resolve(homedir(), ".local/share/pkm"),
-);
+const serverDataDir =
+  process.env.PKM_SERVER_DATA_DIR ?? resolve(homedir(), ".local/share/pkm");
+const mcp = mcpOptionsFromEnvironment(process.env, serverDataDir);
 const app = await openServerApp(resolve(vaultRoot), {
   logger: true,
   webRoot,
+  objectStorePath: resolve(serverDataDir, "objects.sqlite"),
   ...(mcp ? { mcp } : {}),
 });
 await app.listen({ host, port: portValue });

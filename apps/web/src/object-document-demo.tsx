@@ -4,168 +4,27 @@ import {
   TYPE_COLORS,
   type DocNode,
   type FieldDefinition,
-  type ObjectPage,
-  type ObjectRecord,
+  type ObjectClient,
+  type ObjectOverview,
   type ObjectSummary,
   type ObjectTimelineEntry,
   type ObjectType,
+  type ObjectTypePatch,
   type TypeDefinition,
 } from "@pkm/core";
 import { ObjectEditor, typeLabel, type EditorHost } from "@pkm/editor";
 import { useEffect, useRef, useState } from "react";
 
-const MINUTE = 60_000;
-const DAY = 24 * 60 * MINUTE;
-const startOfToday = (): number => new Date().setHours(0, 0, 0, 0);
-const dailyId = (): string => {
-  const now = new Date();
-  const pad = (value: number): string => String(value).padStart(2, "0");
-  return `daily:${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-};
-const isDaily = (hostId: string): boolean => hostId.startsWith("daily:");
+import {
+  dailyDate,
+  dailyHostId,
+  dateRange,
+  localDate,
+  shiftDate,
+} from "./object-date.js";
 
-interface Overview {
-  readonly navigation: readonly ObjectSummary[];
-  readonly recent: readonly ObjectSummary[];
-}
-
-const api = async <T,>(
-  method: string,
-  path: string,
-  body?: unknown,
-  keepalive = false,
-): Promise<T> => {
-  const response = await fetch(`/api/next${path}`, {
-    method,
-    keepalive,
-    ...(body === undefined
-      ? {}
-      : {
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        }),
-  });
-  if (!response.ok) {
-    const detail = (await response.json().catch(() => null)) as {
-      message?: string;
-    } | null;
-    throw new Error(detail?.message ?? `HTTP ${response.status}`);
-  }
-  return (response.status === 204 ? undefined : await response.json()) as T;
-};
-const encode = encodeURIComponent;
-
-/* ---------- 試作データ ---------- */
-
-const text = (value: string): DocNode => ({ type: "text", text: value });
-const paragraph = (time: number, ...content: DocNode[]): DocNode => ({
-  type: "paragraph",
-  attrs: { id: newId(time) },
-  ...(content.length ? { content } : {}),
-});
-const embed = (objectId: string, collapsed = true): DocNode => ({
-  type: "objectEmbed",
-  attrs: { id: newId(), objectId, collapsed },
-});
-
-const seedWorkspace = (): {
-  objects: ObjectRecord[];
-  documents: Record<string, DocNode[]>;
-} => {
-  const now = Date.now();
-  const object = (
-    id: string,
-    type: ObjectType,
-    title: string,
-    contexts: readonly string[],
-    age: number,
-    body: readonly DocNode[] = [],
-  ): ObjectRecord => ({
-    id,
-    type,
-    title: [text(title)],
-    body,
-    done: false,
-    contexts,
-    createdAt: now - age,
-  });
-  return {
-    objects: [
-      object("area-dev", "area", "個人開発", [], 90 * DAY, [
-        paragraph(now - 90 * DAY, text("趣味で作っているソフトウェア全般。")),
-      ]),
-      object("proj-ctx", "project", "Contextory", ["area-dev"], 60 * DAY, [
-        {
-          type: "heading",
-          attrs: { id: newId(now - 60 * DAY), level: 2 },
-          content: [text("方針")],
-        },
-        paragraph(
-          now - 60 * DAY,
-          text(
-            "自由な文書の中から、Objectをその場で参照・作成・紐づけできるようにする。",
-          ),
-        ),
-        embed("task-input", false),
-        paragraph(now),
-      ]),
-      object("proj-blog", "project", "技術ブログ", ["area-dev"], 40 * DAY, [
-        paragraph(now - 40 * DAY, text("月1本を目安に書く。")),
-      ]),
-      object(
-        "task-input",
-        "task",
-        "入力体験を再設計する",
-        ["proj-ctx"],
-        3 * DAY,
-        [
-          paragraph(
-            now - 3 * DAY,
-            text(
-              "編集時は一つの文書木として扱い、保存時にObject単位へ分ける。",
-            ),
-          ),
-          embed("task-at"),
-        ],
-      ),
-      object("task-at", "task", "@メニューを試作する", ["task-input"], 2 * DAY),
-      object(
-        "dec-embed",
-        "decision",
-        "Objectは独立本文＋埋め込みで扱う",
-        ["task-input"],
-        26 * 60 * MINUTE,
-        [
-          paragraph(
-            now - 26 * 60 * MINUTE,
-            text("境界が編集で動かないことを優先する。"),
-          ),
-        ],
-      ),
-      object(
-        "memo-tana",
-        "memo",
-        "Tanaは@で参照と作成が一体になっているのが良い。",
-        ["proj-ctx"],
-        95 * MINUTE,
-      ),
-    ],
-    documents: {
-      [dailyId()]: [
-        paragraph(now - 120 * MINUTE, text("朝。今日は入力まわりを進める。")),
-        embed("memo-tana"),
-        paragraph(
-          now - 30 * MINUTE,
-          { type: "objectRef", attrs: { objectId: "task-input" } },
-          text(
-            " の続きを考える。@で触れた段落は、所属を変えずに参照先のTimelineへ出る。",
-          ),
-        ),
-        paragraph(now),
-      ],
-    },
-  };
-};
+const isDaily = (hostId: string): boolean => dailyDate(hostId) !== null;
+const startOfToday = (): number => dateRange(localDate()).from;
 
 const formatTime = (time: number): string =>
   new Intl.DateTimeFormat(
@@ -203,13 +62,7 @@ const TypePage = ({
   /** 継承元に選べる種別 */
   readonly others: readonly TypeDefinition[];
   readonly objects: readonly ObjectSummary[];
-  readonly onPatch: (patch: {
-    name?: string;
-    color?: string | null;
-    checkbox?: boolean;
-    extends?: string | null;
-    fields?: readonly FieldDefinition[];
-  }) => void;
+  readonly onPatch: (patch: ObjectTypePatch) => void;
   readonly row: (object: ObjectSummary) => React.JSX.Element;
 }): React.JSX.Element => {
   const { fields } = definition;
@@ -432,7 +285,11 @@ const TypePage = ({
 /** 保存を少し待ってまとめる時間。 */
 const SAVE_DELAY = 400;
 
-export const ObjectDocumentDemo = (): React.JSX.Element => {
+export const ObjectApp = ({
+  client,
+}: {
+  readonly client: ObjectClient;
+}): React.JSX.Element => {
   const [loaded, setLoaded] = useState<{
     readonly key: number;
     readonly hostId: string;
@@ -442,7 +299,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     Readonly<Record<string, ObjectSummary>>
   >({});
   const [timeline, setTimeline] = useState<readonly ObjectTimelineEntry[]>([]);
-  const [overview, setOverview] = useState<Overview>({
+  const [overview, setOverview] = useState<ObjectOverview>({
     navigation: [],
     recent: [],
   });
@@ -457,12 +314,16 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
   const [status, setStatus] = useState("saved");
   // Titleは入力中に保存結果で巻き戻らないよう、画面側の値を正とする。
   const [title, setTitle] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createType, setCreateType] = useState<ObjectType>("project");
 
   // 書き込みは一本の列に並べ、作成→本文保存の順序を保つ。
   const queue = useRef<Promise<void>>(Promise.resolve());
   const pending = useRef<{ hostId: string; doc: DocNode } | null>(null);
   const timer = useRef<number | undefined>(undefined);
   const loads = useRef(0);
+  const started = useRef(false);
 
   const page = loaded?.hostId ?? null;
   const current = page === null ? undefined : objects[page];
@@ -481,15 +342,11 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
   };
 
   const refreshSide = async (hostId: string): Promise<void> => {
+    const range = dateRange(dailyDate(hostId) ?? localDate());
     const [nextOverview, nextTypes, nextTimeline] = await Promise.all([
-      api<Overview>("GET", `/overview?since=${startOfToday()}`),
-      api<TypeDefinition[]>("GET", "/types"),
-      isDaily(hostId)
-        ? Promise.resolve([])
-        : api<ObjectTimelineEntry[]>(
-            "GET",
-            `/objects/${encode(hostId)}/timeline`,
-          ),
+      client.overview(range.from, range.to),
+      client.types(),
+      isDaily(hostId) ? Promise.resolve([]) : client.timeline(hostId),
     ]);
     setOverview(nextOverview);
     setTypes(nextTypes);
@@ -510,11 +367,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     if (!save) return;
     pending.current = null;
     void enqueue(async () => {
-      const result = await api<ObjectPage>(
-        "PUT",
-        `/pages/${encode(save.hostId)}`,
-        { doc: save.doc },
-      );
+      const result = await client.savePage(save.hostId, save.doc);
       merge(result.objects);
       await refreshSide(save.hostId);
     });
@@ -523,7 +376,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
   const open = (hostId: string): void => {
     flush();
     void enqueue(async () => {
-      const result = await api<ObjectPage>("GET", `/pages/${encode(hostId)}`);
+      const result = await client.loadPage(hostId);
       merge(result.objects);
       const own = result.objects[hostId]?.title ?? "";
       setTitle(own === "無題" ? "" : own);
@@ -539,8 +392,8 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     flush();
     void enqueue(async () => {
       const [nextTypes, found] = await Promise.all([
-        api<TypeDefinition[]>("GET", "/types"),
-        api<ObjectSummary[]>("GET", `/objects?type=${encode(name)}`),
+        client.types(),
+        client.objectsOfType(name),
       ]);
       setTypes(nextTypes);
       // 文書は開き直した時に、新しい定義で組み立て直す。
@@ -555,36 +408,20 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     patch: Parameters<React.ComponentProps<typeof TypePage>["onPatch"]>[0],
   ): void => {
     void enqueue(async () => {
-      await api("PATCH", `/types/${encode(name)}`, patch);
+      await client.updateType(name, patch);
     });
     openType(patch.name ?? name);
   };
 
-  const reset = (hostId: string): void => {
-    pending.current = null;
-    void enqueue(async () => {
-      await api("PUT", "/workspace", seedWorkspace());
-      setObjects({});
-    });
-    open(hostId);
-  };
-
   useEffect(() => {
-    void api<Overview>("GET", "/overview").then(
-      (initial) =>
-        initial.navigation.length ? open(dailyId()) : reset("proj-ctx"),
-      (error: unknown) => setStatus(String(error)),
-    );
+    if (!started.current) {
+      started.current = true;
+      open(dailyHostId());
+    }
     // 閉じる直前の入力も、待たずに送る。
     const onHide = (): void => {
       const save = pending.current;
-      if (save)
-        void api(
-          "PUT",
-          `/pages/${encode(save.hostId)}`,
-          { doc: save.doc },
-          true,
-        );
+      if (save) void client.savePage(save.hostId, save.doc, true);
     };
     window.addEventListener("pagehide", onHide);
     return () => window.removeEventListener("pagehide", onHide);
@@ -608,27 +445,21 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
     types: () => types,
     page: current ? { id: current.id, type: current.type } : null,
     search: (query) =>
-      api<ObjectSummary[]>(
-        "GET",
-        `/objects?query=${encode(query)}${page ? `&exclude=${encode(page)}` : ""}`,
-      ).then((found) => {
+      client.searchObjects(query, page).then((found) => {
         merge(Object.fromEntries(found.map((o) => [o.id, o])));
         return found;
       }),
     create: (type, title, parentId) => {
       const id = newId();
       const parent = parentId ?? (page && !isDaily(page) ? page : null);
-      mutate(
-        () => api("POST", "/objects", { id, type, title, parentId: parent }),
-        {
-          id,
-          type,
-          title,
-          done: false,
-          contexts: inheritedContexts(parent ? objects[parent] : undefined),
-          createdAt: Date.now(),
-        },
-      );
+      mutate(() => client.createObject({ id, type, title, parentId: parent }), {
+        id,
+        type,
+        title,
+        done: false,
+        contexts: inheritedContexts(parent ? objects[parent] : undefined),
+        createdAt: Date.now(),
+      });
       return id;
     },
     open,
@@ -702,6 +533,31 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
 
   const areas = overview.navigation.filter((o) => o.type === "area");
   const projects = overview.navigation.filter((o) => o.type === "project");
+  const selectedDate = page === null ? null : dailyDate(page);
+  const createOutside = (): void => {
+    const id = newId();
+    const object: ObjectSummary = {
+      id,
+      type: createType,
+      title: createTitle.trim() || "無題",
+      done: false,
+      contexts: [],
+      createdAt: Date.now(),
+    };
+    mutate(
+      () =>
+        client.createObject({
+          id,
+          type: createType,
+          title: createTitle.trim(),
+          parentId: null,
+        }),
+      object,
+    );
+    setCreating(false);
+    setCreateTitle("");
+    open(id);
+  };
   const navButton = (
     object: ObjectSummary,
     className: string,
@@ -721,7 +577,6 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
       <header className="od-topbar">
         <div>
           <span className="od-product">Contextory</span>
-          <span className="od-label">Document-first demo</span>
           <span
             className="od-save-status"
             role="status"
@@ -735,18 +590,73 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
           </span>
         </div>
         <div className="od-topbar-actions">
-          <a href="?demo=object-model">View demo</a>
-          <button type="button" onClick={() => reset(dailyId())}>
-            リセット
+          <button
+            type="button"
+            onClick={() => {
+              setCreateType(
+                types.some((definition) => definition.name === "project")
+                  ? "project"
+                  : (types[0]?.name ?? "project"),
+              );
+              setCreating(true);
+            }}
+          >
+            ＋ Object
           </button>
         </div>
       </header>
+      {creating ? (
+        <div className="od-dialog-backdrop">
+          <form
+            className="od-create-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="od-create-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setCreating(false);
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              createOutside();
+            }}
+          >
+            <h2 id="od-create-title">Objectを作成</h2>
+            <label>
+              種別
+              <select
+                value={createType}
+                onChange={(event) => setCreateType(event.currentTarget.value)}
+              >
+                {types.map((definition) => (
+                  <option key={definition.name} value={definition.name}>
+                    #{typeLabel(definition.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Title
+              <input
+                autoFocus
+                value={createTitle}
+                onChange={(event) => setCreateTitle(event.currentTarget.value)}
+              />
+            </label>
+            <div className="od-dialog-actions">
+              <button type="button" onClick={() => setCreating(false)}>
+                キャンセル
+              </button>
+              <button type="submit">作成</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       <div className="od-shell">
         <nav className="od-nav" aria-label="ページ">
           <button
             type="button"
             aria-current={page !== null && isDaily(page) ? "page" : undefined}
-            onClick={() => open(dailyId())}
+            onClick={() => open(dailyHostId())}
           >
             Daily
           </button>
@@ -787,7 +697,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
             <dt>⌫</dt>
             <dd>Title先頭でObjectを解除</dd>
           </dl>
-          <p className="od-nav-note">Prototype · サーバーのSQLiteへ保存</p>
+          <p className="od-nav-note">サーバーのSQLiteへ保存</p>
         </nav>
         <main className="od-main">
           {typePage ? (
@@ -836,9 +746,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                       const value = event.currentTarget.value;
                       setTitle(value);
                       mutate(() =>
-                        api("PATCH", `/objects/${encode(current.id)}`, {
-                          title: value,
-                        }),
+                        client.patchObject(current.id, { title: value }),
                       );
                     }}
                   />
@@ -851,7 +759,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                           onChange={() =>
                             mutate(
                               () =>
-                                api("PATCH", `/objects/${encode(current.id)}`, {
+                                client.patchObject(current.id, {
                                   done: !current.done,
                                 }),
                               { ...current, done: !current.done },
@@ -866,12 +774,56 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
               ) : (
                 <header className="od-page-header">
                   <span className="od-type">Daily</span>
+                  <div className="od-daily-nav">
+                    <button
+                      type="button"
+                      aria-label="前の日"
+                      onClick={() =>
+                        open(
+                          dailyHostId(
+                            shiftDate(selectedDate ?? localDate(), -1),
+                          ),
+                        )
+                      }
+                    >
+                      ‹
+                    </button>
+                    <input
+                      type="date"
+                      aria-label="Dailyの日付"
+                      value={selectedDate ?? localDate()}
+                      onChange={(event) => {
+                        const date = event.currentTarget.value;
+                        if (date) open(dailyHostId(date));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label="次の日"
+                      onClick={() =>
+                        open(
+                          dailyHostId(
+                            shiftDate(selectedDate ?? localDate(), 1),
+                          ),
+                        )
+                      }
+                    >
+                      ›
+                    </button>
+                    {selectedDate === localDate() ? null : (
+                      <button type="button" onClick={() => open(dailyHostId())}>
+                        今日
+                      </button>
+                    )}
+                  </div>
                   <h1>
                     {new Intl.DateTimeFormat("ja-JP", {
                       month: "long",
                       day: "numeric",
                       weekday: "short",
-                    }).format(new Date())}
+                    }).format(
+                      new Date(`${selectedDate ?? localDate()}T12:00:00`),
+                    )}
                   </h1>
                   <p className="od-page-lead">
                     自由に書く。@で触れた段落・見出し・リスト項目は、参照先のTimelineに出る。
@@ -931,8 +883,8 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                 <section className="od-panel">
                   <header>
                     <div>
-                      <h2>今日の記録</h2>
-                      <p>今日作成したObject。本文は複製せず、元の場所が正本</p>
+                      <h2>この日の記録</h2>
+                      <p>この日に作成したObject。本文は元の場所に保存する</p>
                     </div>
                   </header>
                   {overview.recent.length ? (

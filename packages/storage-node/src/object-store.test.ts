@@ -167,6 +167,7 @@ describe("ObjectStore", () => {
     expect(store.search("検索", null).map((o) => o.id)).toEqual(["x"]);
     expect(store.search("", "x").map((o) => o.id)).not.toContain("memo");
     expect(store.overview(50).recent.map((o) => o.id)).toEqual(["x"]);
+    expect(store.overview(0, 50).recent.map((o) => o.id)).not.toContain("x");
   });
 
   it("keeps user-defined types and lists them", () => {

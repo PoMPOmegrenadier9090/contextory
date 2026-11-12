@@ -183,3 +183,8 @@ export type {
   ObjectTimelineEntry,
   ObjectType,
 } from "./object-model.js";
+export type {
+  ObjectClient,
+  ObjectOverview,
+  ObjectTypePatch,
+} from "./object-client.js";

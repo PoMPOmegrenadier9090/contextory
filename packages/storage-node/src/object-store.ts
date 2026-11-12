@@ -866,8 +866,11 @@ export class ObjectStore {
     return this.types().find((type) => type.name === current)!;
   }
 
-  /** 画面の入口に出すObjectと、since以降に作成したObject。 */
-  overview(since: number): {
+  /** 画面の入口に出すObjectと、指定期間に作成したObject。 */
+  overview(
+    from: number,
+    to = Number.MAX_SAFE_INTEGER,
+  ): {
     readonly navigation: ObjectSummary[];
     readonly recent: ObjectSummary[];
   } {
@@ -879,7 +882,11 @@ export class ObjectStore {
       ).map((row) => this.summary(row));
     return {
       navigation: select("type IN ('area', 'project') ORDER BY created_at"),
-      recent: select("created_at >= ? ORDER BY created_at DESC", since),
+      recent: select(
+        "created_at >= ? AND created_at < ? ORDER BY created_at DESC",
+        from,
+        to,
+      ),
     };
   }
 

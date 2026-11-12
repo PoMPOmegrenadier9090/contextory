@@ -23,7 +23,7 @@ const requireType = (value: unknown): ObjectRecord["type"] => {
   return type;
 };
 
-/** 次期Object保存層のHTTP API。試作中のため /api/next 配下に置く。 */
+/** Object保存層のHTTP API。 */
 export const registerObjectRoutes = (
   app: FastifyInstance,
   store: ObjectStore,
@@ -128,9 +128,12 @@ export const registerObjectRoutes = (
   });
 
   app.get("/api/next/overview", (request) => {
-    const since = Number(requireRecord(request.query).since ?? 0);
-    if (!Number.isFinite(since)) throw new TypeError("since must be a number");
-    return store.overview(since);
+    const query = requireRecord(request.query);
+    const from = Number(query.from ?? 0);
+    const to = Number(query.to ?? Number.MAX_SAFE_INTEGER);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to)
+      throw new TypeError("from and to must be a valid range");
+    return store.overview(from, to);
   });
 
   /** 内容をすべて置き換える。試作データの投入用。 */
