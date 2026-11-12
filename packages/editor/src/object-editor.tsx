@@ -1,4 +1,5 @@
 import UniqueID from "@tiptap/extension-unique-id";
+import { GapCursor } from "@tiptap/pm/gapcursor";
 import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import {
@@ -278,7 +279,9 @@ const ObjectBlockView = ({
           aria-label={collapsed ? "展開" : "畳む"}
           onClick={toggle}
         >
-          {collapsed ? "▸" : "▾"}
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M6 4l4 4-4 4" />
+          </svg>
         </button>
         <button
           type="button"
@@ -394,13 +397,26 @@ const ObjectBlock = Node.create({
   },
 });
 
-/** 畳んだObjectの見えていない行へ、カーソルが入らないようにする。 */
+/**
+ * 畳んだObjectの見えていない行と、Fieldの行のすき間へ、カーソルが入らないようにする。
+ * すき間で入力すると、Fieldの間に段落が割り込んでObjectが分かれてしまう。
+ */
 const CollapsedGuard = Extension.create({
   name: "collapsedGuard",
   addProseMirrorPlugins: () => [
     new Plugin({
       appendTransaction(_transactions, oldState, newState) {
         const { $head, head } = newState.selection;
+        const forward = head >= oldState.selection.head;
+        if (
+          newState.selection instanceof GapCursor &&
+          [$head.nodeBefore, $head.nodeAfter].some(
+            (node) => node?.type.name === "objectField",
+          )
+        )
+          return newState.tr.setSelection(
+            TextSelection.near($head, forward ? 1 : -1),
+          );
         for (let depth = 1; depth <= $head.depth; depth++) {
           const node = $head.node(depth);
           if (
@@ -418,9 +434,7 @@ const CollapsedGuard = Extension.create({
           // 進んできた向きへ抜ける。後ろに行ける場所が無ければTitleへ戻す。
           const after = TextSelection.near(newState.doc.resolve(end), 1);
           return newState.tr.setSelection(
-            head >= oldState.selection.head && after.head >= end
-              ? after
-              : title,
+            forward && after.head >= end ? after : title,
           );
         }
         return null;
