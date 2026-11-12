@@ -30,6 +30,14 @@ Webの通常の起動入口をObject画面へ切り替えた。既存のMarkdown
 
 保存は0.4秒分の入力をまとめ、書き込みを一列に並べる。画面を閉じる時は未送信の文書をkeepalive付きで送る。作成、本文保存、画面の再取得は同じ列を使うため、文書外でObjectを作った直後にそのページを開いても順序が入れ替わらない。
 
+## Object化する範囲はBlockの構造に合わせる
+
+`#`によるObject化は、段落だけでなく見出しとリスト項目にも適用する。見出しは、次の同じ階層以上の見出しまでを一つのSectionとして取り込む。見出しをTitle、Section内のBlockを本文にする。
+
+リスト項目では、先頭の段落をTitle、子のリストやBlockを本文にする。同じリストにある前後の項目は残す。Object化した内容は元の位置から別の画面へ移さず、その場にObjectとして置く。
+
+Object行の行頭は開閉と完了だけにし、「Objectを開く」ボタンは行末へ移す。Title、Field、本文の左端をそろえ、種別タグはTitleと同じ行に置く。`Mod+Enter`（macOSでは`⌘ Enter`）で、カーソルを置いたObjectを展開・折りたたみできる。
+
 ## Desktopも同じObject画面を使う
 
 DesktopのmainプロセスにObjectClientと同じ操作をIPCとして追加し、HTTP APIと共通の入力検証を通す。rendererはWebと同じObject画面を使う。次は既存Vaultの取り込み、Quick Capture、MCPツールの順に接続する。

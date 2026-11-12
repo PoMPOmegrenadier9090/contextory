@@ -1,6 +1,10 @@
 import UniqueID from "@tiptap/extension-unique-id";
 import { GapCursor } from "@tiptap/pm/gapcursor";
-import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
+import {
+  Fragment,
+  type Node as PMNode,
+  type ResolvedPos,
+} from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
@@ -90,6 +94,12 @@ const enclosingObjectId = (editor: Editor, pos: number): string | null => {
     if (node.type.name === "objectBlock") return String(node.attrs.objectId);
   }
   return null;
+};
+
+const enclosingObjectDepth = ($pos: ResolvedPos): number => {
+  for (let depth = $pos.depth; depth > 0; depth--)
+    if ($pos.node(depth).type.name === "objectBlock") return depth;
+  return -1;
 };
 
 const typeOf = (
@@ -382,26 +392,20 @@ const ObjectBlockView = ({
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
     >
-      {/* Tanaと同じく、行頭に開閉と「開く」を置いて、マウスの移動を減らす。 */}
+      {/* 行頭は開閉と完了だけにして、Titleの開始位置を本文へ近づける。 */}
       <span className="pe-object-lead" contentEditable={false}>
         <button
           type="button"
           className="pe-toggle"
           aria-expanded={!collapsed}
           aria-label={collapsed ? "展開" : "畳む"}
+          aria-keyshortcuts="Meta+Enter Control+Enter"
           onClick={toggle}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M6 4l4 4-4 4" />
           </svg>
         </button>
-        <button
-          type="button"
-          className="pe-bullet"
-          data-has-body={hasBody}
-          aria-label="開く"
-          onClick={() => host.open(id)}
-        />
         {checkbox ? (
           <input
             type="checkbox"
@@ -413,6 +417,13 @@ const ObjectBlockView = ({
       </span>
       <NodeViewContent className="pe-object-content" />
       <span className="pe-object-side" contentEditable={false}>
+        <button
+          type="button"
+          className="pe-bullet"
+          data-has-body={hasBody}
+          aria-label="Objectを開く"
+          onClick={() => host.open(id)}
+        />
         {collapsed ? values.slice(0, SIDE_VALUES) : null}
         {collapsed && values.length > SIDE_VALUES ? (
           <span className="pe-value">+{values.length - SIDE_VALUES}</span>
@@ -442,6 +453,21 @@ const ObjectBlock = Node.create({
   addNodeView: () => ReactNodeViewRenderer(ObjectBlockView),
   addKeyboardShortcuts() {
     return {
+      "Mod-Enter": ({ editor }) => {
+        const { $from } = editor.state.selection;
+        const depth = enclosingObjectDepth($from);
+        if (depth < 0) return false;
+        return editor.commands.command(({ tr }) => {
+          const object = $from.node(depth);
+          const at = $from.before(depth);
+          tr.setNodeAttribute(at, "collapsed", !object.attrs.collapsed);
+          if (!object.attrs.collapsed)
+            tr.setSelection(
+              TextSelection.create(tr.doc, at + object.firstChild!.nodeSize),
+            );
+          return true;
+        });
+      },
       Enter: ({ editor }) => {
         const { $from, empty } = editor.state.selection;
         const depth = $from.depth - 1;
@@ -525,7 +551,7 @@ const createTags = (host: RefObject<EditorHost>): Extension =>
                     tag.onclick = () => host.current.openType(type);
                     return tag;
                   },
-                  { side: 1, key: `tag-${type}`, ignoreSelection: true },
+                  { side: -1, key: `tag-${type}`, ignoreSelection: true },
                 ),
               );
             });
@@ -626,6 +652,114 @@ const insertRef = (editor: Editor, range: Range, objectId: string): void => {
     .run();
 };
 
+interface ObjectConversionTarget {
+  readonly receiverDepth: number;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+  readonly from: number;
+  readonly to: number;
+  readonly title: PMNode["content"];
+  readonly body: readonly PMNode[];
+  readonly before: readonly PMNode[];
+  readonly after: readonly PMNode[];
+}
+
+/** 見出しはSection、リストでは項目と子を、Objectへ移す単位にする。 */
+export const objectConversionTargetAt = (
+  $pos: ResolvedPos,
+): ObjectConversionTarget | null => {
+  const block = $pos.parent;
+  const depth = $pos.depth;
+  if (depth < 1) return null;
+
+  if (block.type.name === "paragraph") {
+    const parent = $pos.node(depth - 1);
+    if (
+      parent.type.name === "listItem" &&
+      $pos.index(depth - 1) === 0 &&
+      depth >= 2
+    ) {
+      const listDepth = depth - 2;
+      const list = $pos.node(listDepth);
+      if (list.type.name !== "bulletList" && list.type.name !== "orderedList")
+        return null;
+      const itemIndex = $pos.index(listDepth);
+      const items = Array.from({ length: list.childCount }, (_, index) =>
+        list.child(index),
+      );
+      const before = itemIndex
+        ? [list.type.create(list.attrs, items.slice(0, itemIndex))]
+        : [];
+      const afterItems = items.slice(itemIndex + 1);
+      const after = afterItems.length
+        ? [
+            list.type.create(
+              list.type.name === "orderedList"
+                ? {
+                    ...list.attrs,
+                    start: Number(list.attrs.start ?? 1) + itemIndex + 1,
+                  }
+                : list.attrs,
+              afterItems,
+            ),
+          ]
+        : [];
+      return {
+        receiverDepth: listDepth - 1,
+        fromIndex: $pos.index(listDepth - 1),
+        toIndex: $pos.index(listDepth - 1) + 1,
+        from: $pos.before(listDepth),
+        to: $pos.after(listDepth),
+        title: block.content,
+        body: Array.from({ length: parent.childCount - 1 }, (_, index) =>
+          parent.child(index + 1),
+        ),
+        before,
+        after,
+      };
+    }
+    const index = $pos.index(depth - 1);
+    return {
+      receiverDepth: depth - 1,
+      fromIndex: index,
+      toIndex: index + 1,
+      from: $pos.before(depth),
+      to: $pos.after(depth),
+      title: block.content,
+      body: [],
+      before: [],
+      after: [],
+    };
+  }
+
+  if (block.type.name !== "heading") return null;
+  const parent = $pos.node(depth - 1);
+  const index = $pos.index(depth - 1);
+  const level = Number(block.attrs.level);
+  let toIndex = index + 1;
+  let to = $pos.after(depth);
+  const body: PMNode[] = [];
+  while (toIndex < parent.childCount) {
+    const child = parent.child(toIndex);
+    if (child.type.name === "heading" && Number(child.attrs.level) <= level)
+      break;
+    body.push(child);
+    to += child.nodeSize;
+    toIndex++;
+  }
+  return {
+    receiverDepth: depth - 1,
+    fromIndex: index,
+    toIndex,
+    from: $pos.before(depth),
+    to,
+    title: block.content,
+    body,
+    before: [],
+    after: [],
+  };
+};
+
 const atItems = async (
   host: EditorHost,
   query: string,
@@ -663,8 +797,6 @@ const convertBlock = (
     .deleteRange(range)
     .command(({ tr, state }) => {
       const $pos = tr.selection.$from;
-      const block = $pos.parent;
-      const depth = $pos.depth;
       const {
         objectBlock,
         objectTitle,
@@ -673,11 +805,8 @@ const convertBlock = (
         objectRef,
         paragraph,
       } = state.schema.nodes;
-      if (block.type !== paragraph || depth < 1) return false;
-      const index = $pos.index(depth - 1);
-      // リスト項目の先頭段落など、Objectを置けない場所では変換しない。
-      if (!$pos.node(depth - 1).canReplaceWith(index, index + 1, objectBlock!))
-        return false;
+      const target = objectConversionTargetAt($pos);
+      if (!target) return false;
       // Fieldの行は作成時に並べる。Contextには置かれた場所から継ぐ値を入れる。
       const definition = typeOf(host, type);
       const fields = (
@@ -703,14 +832,30 @@ const convertBlock = (
             ),
       );
       const object = objectBlock!.create({ objectId: newId(), type }, [
-        objectTitle!.create(null, block.content),
+        objectTitle!.create(null, target.title),
         ...fields,
+        ...target.body,
       ]);
-      const start = $pos.before(depth);
-      tr.replaceWith(start, start + block.nodeSize, [
+      const replacement = [
+        ...target.before,
         object,
-        paragraph.create(),
-      ]);
+        paragraph!.create(),
+        ...target.after,
+      ];
+      if (
+        !$pos
+          .node(target.receiverDepth)
+          .canReplace(
+            target.fromIndex,
+            target.toIndex,
+            Fragment.fromArray(replacement),
+          )
+      )
+        return false;
+      tr.replaceWith(target.from, target.to, replacement);
+      const start =
+        target.from +
+        target.before.reduce((size, node) => size + node.nodeSize, 0);
       tr.setSelection(
         TextSelection.create(tr.doc, start + object.nodeSize + 1),
       );

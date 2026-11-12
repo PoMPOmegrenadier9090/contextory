@@ -128,10 +128,10 @@
   outline: 2px solid var(--pe-type, var(--pe-project));
 }
 
-/* object block: 行頭に開閉と「開く」、1行目はTitle、開いた時だけFieldと本文を出す */
+/* object block: 行頭は開閉・完了だけにし、1行目はTitle、開いた時だけFieldと本文を出す */
 .pe-object {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 6px;
 }
@@ -149,23 +149,22 @@
   display: flex;
   gap: 2px;
   align-items: center;
-  height: 31px;
-  margin-right: 8px;
+  height: 30px;
   user-select: none;
 }
 
 .pe-object-lead input {
-  width: 16px;
-  height: 16px;
-  margin: 0 0 0 4px;
+  width: 14px;
+  height: 14px;
+  margin: 0 0 0 2px;
   accent-color: var(--pe-type);
 }
 
 .pe-toggle {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   color: var(--pe-muted);
   background: none;
@@ -207,15 +206,15 @@
   }
 }
 
-/* 行頭の点。押すとObjectを開く。畳んだ中身があれば輪を付ける。 */
+/* 行末の点。押すとObjectを開く。畳んだ中身があれば輪を付ける。 */
 .pe-bullet {
   box-sizing: content-box;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   padding: 0;
   background: var(--pe-type);
   background-clip: content-box;
-  border: 6px solid transparent;
+  border: 5px solid transparent;
   border-radius: 50%;
   cursor: pointer;
 }
