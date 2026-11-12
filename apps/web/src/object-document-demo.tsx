@@ -184,21 +184,30 @@ const FILTERS: readonly (readonly [TimelineFilter, string])[] = [
   ["mention", "言及"],
 ];
 
-const KIND_LABEL = { text: "テキスト", reference: "参照" } as const;
+const KIND_LABEL = {
+  text: "テキスト",
+  reference: "参照",
+  date: "日付",
+  select: "選択",
+} as const;
 
 /** 種別のページ。名前・色・Fieldをここで定義する。 */
 const TypePage = ({
   definition,
+  others,
   objects,
   onPatch,
   row,
 }: {
   readonly definition: TypeDefinition;
+  /** 継承元に選べる種別 */
+  readonly others: readonly TypeDefinition[];
   readonly objects: readonly ObjectSummary[];
   readonly onPatch: (patch: {
     name?: string;
     color?: string | null;
     checkbox?: boolean;
+    extends?: string | null;
     fields?: readonly FieldDefinition[];
   }) => void;
   readonly row: (object: ObjectSummary) => React.JSX.Element;
@@ -271,6 +280,22 @@ const TypePage = ({
         />
         行頭に完了のチェックボックスを出す
       </label>
+      <label className="od-status od-type-option">
+        継承元
+        <select
+          value={definition.extends ?? ""}
+          onChange={(event) =>
+            onPatch({ extends: event.currentTarget.value || null })
+          }
+        >
+          <option value="">なし</option>
+          {others.map((other) => (
+            <option key={other.name} value={other.name}>
+              #{typeLabel(other.name)}
+            </option>
+          ))}
+        </select>
+      </label>
       <section className="od-panel">
         <header>
           <div>
@@ -304,7 +329,8 @@ const TypePage = ({
                     value={field.kind}
                     onChange={(event) =>
                       setField(index, {
-                        kind: event.currentTarget.value as "text" | "reference",
+                        kind: event.currentTarget
+                          .value as keyof typeof KIND_LABEL,
                       })
                     }
                   >
@@ -314,6 +340,24 @@ const TypePage = ({
                       </option>
                     ))}
                   </select>
+                  {field.kind === "select" ? (
+                    <input
+                      key={(field.options ?? []).join()}
+                      className="od-field-options"
+                      aria-label="選択肢"
+                      placeholder="選択肢（カンマ区切り）"
+                      defaultValue={(field.options ?? []).join(", ")}
+                      onKeyDown={commitOnEnter}
+                      onBlur={(event) =>
+                        setField(index, {
+                          options: event.currentTarget.value
+                            .split(/[,、]/)
+                            .map((option) => option.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                    />
+                  ) : null}
                 </>
               )}
               <span className="od-field-actions">
@@ -345,6 +389,12 @@ const TypePage = ({
                   </button>
                 )}
               </span>
+            </li>
+          ))}
+          {definition.inherited.map((field) => (
+            <li key={field.id}>
+              <strong>{field.name}</strong>
+              <small>継承元から引き継ぐ</small>
             </li>
           ))}
         </ul>
@@ -582,12 +632,7 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
       return id;
     },
     open,
-    contexts: (id, parentId) => {
-      const implied = inheritedContexts(objects[parentId ?? page ?? ""]);
-      return (objects[id]?.contexts ?? [])
-        .filter((context) => !implied.includes(context))
-        .flatMap((context) => objects[context] ?? []);
-    },
+    openType: (type) => openType(type),
   };
 
   const hasCheckbox = (type: ObjectType): boolean =>
@@ -624,7 +669,9 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
       objectRow(
         entry.object,
         entry.mentioned
-          ? ["言及", viaNote(entry.via)].filter(Boolean).join(" · ")
+          ? [entry.field ? `${entry.field}で言及` : "言及", viaNote(entry.via)]
+              .filter(Boolean)
+              .join(" · ")
           : viaNote(entry.via) || "直接",
       )
     ) : (
@@ -754,8 +801,13 @@ export const ObjectDocumentDemo = (): React.JSX.Element => {
                   builtin: false,
                   checkbox: false,
                   fields: [],
+                  extends: null,
+                  inherited: [],
                 }
               }
+              others={types.filter(
+                (definition) => definition.name !== typePage.name,
+              )}
               objects={typePage.objects}
               onPatch={(patch) => patchType(typePage.name, patch)}
               row={(object) => objectRow(object, "")}

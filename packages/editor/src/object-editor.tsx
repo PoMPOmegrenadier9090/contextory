@@ -2,6 +2,7 @@ import UniqueID from "@tiptap/extension-unique-id";
 import { GapCursor } from "@tiptap/pm/gapcursor";
 import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
   EditorContent,
   Extension,
@@ -60,11 +61,8 @@ export interface EditorHost {
   readonly types: () => readonly TypeDefinition[];
   /** 開いている文書がObjectの本文なら、そのObject。 */
   readonly page: { readonly id: string; readonly type: ObjectType } | null;
-  /** 置かれた場所から自明でないContext。 */
-  readonly contexts: (
-    id: string,
-    parentId: string | null,
-  ) => readonly EditorObject[];
+  /** 種別のページを開く。 */
+  readonly openType: (type: ObjectType) => void;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -174,29 +172,104 @@ const ObjectTitle = Node.create({
 const Document = Node.create({
   name: "doc",
   topNode: true,
-  content: "objectField* block+",
+  content: "field* block+",
 });
 
-/** 次の行へ進む。最後のFieldなら本文の段落を作る。 */
+const isField = (node: PMNode): boolean => node.type.spec.group === "field";
+
+/** 次に文字を打てる行へ進む。後ろに無ければ本文の段落を作る。 */
 const leaveField = (editor: Editor): boolean => {
   const { $from } = editor.state.selection;
   if ($from.parent.type.name !== "objectField") return false;
-  const after = $from.after();
-  const isLast = $from.indexAfter($from.depth - 1) >= $from.node(-1).childCount;
+  const container = $from.node(-1);
+  let pos = $from.after();
+  let target: number | null = null;
+  for (let i = $from.indexAfter(-1); i < container.childCount; i++) {
+    const child = container.child(i);
+    if (child.type.name !== "objectFieldControl") {
+      target = pos;
+      break;
+    }
+    pos += child.nodeSize;
+  }
+  const end = pos;
   return editor
     .chain()
     .command(({ tr, state }) => {
-      if (isLast) tr.insert(after, state.schema.nodes.paragraph!.create());
-      tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1)));
+      if (target === null)
+        tr.insert(end, state.schema.nodes.paragraph!.create());
+      tr.setSelection(TextSelection.near(tr.doc.resolve((target ?? end) + 1)));
       return true;
     })
     .scrollIntoView()
     .run();
 };
 
+/** 日付や選択肢を選ぶFieldの行。文字は打てない。 */
+const FieldControlView = ({
+  node,
+  updateAttributes,
+}: NodeViewProps): React.JSX.Element => {
+  const value = String(node.attrs.value);
+  const options = node.attrs.options as readonly string[];
+  return (
+    <NodeViewWrapper
+      data-object-field=""
+      data-label={String(node.attrs.name)}
+      contentEditable={false}
+    >
+      {node.attrs.kind === "date" ? (
+        <input
+          type="date"
+          aria-label={String(node.attrs.name)}
+          value={value}
+          onChange={(event) =>
+            updateAttributes({ value: event.currentTarget.value })
+          }
+        />
+      ) : (
+        <select
+          aria-label={String(node.attrs.name)}
+          value={value}
+          onChange={(event) =>
+            updateAttributes({ value: event.currentTarget.value })
+          }
+        >
+          <option value="">—</option>
+          {[...new Set([...options, ...(value ? [value] : [])])].map(
+            (option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ),
+          )}
+        </select>
+      )}
+    </NodeViewWrapper>
+  );
+};
+
+const ObjectFieldControl = Node.create({
+  name: "objectFieldControl",
+  group: "field",
+  atom: true,
+  selectable: false, // 選択した状態で文字を打つと、行ごと置き換わってしまう。
+  addAttributes: () => ({
+    fieldId: { default: "" },
+    name: { default: "" },
+    kind: { default: "select" },
+    options: { default: [] },
+    value: { default: "" },
+  }),
+  parseHTML: () => [{ tag: "div[data-object-field-control]" }],
+  renderHTML: () => ["div", { "data-object-field-control": "" }],
+  addNodeView: () => ReactNodeViewRenderer(FieldControlView),
+});
+
 /** Fieldの1行。値はインライン内容で、@がそのまま使える。 */
 const ObjectField = Node.create({
   name: "objectField",
+  group: "field",
   content: "inline*",
   defining: true,
   isolating: true, // BackspaceやDeleteで、隣の行とつながらないようにする。
@@ -218,6 +291,9 @@ const ObjectField = Node.create({
   },
 });
 
+/** 畳んだ行末に出す値の数。超えた分は「+n」にまとめる。 */
+const SIDE_VALUES = 3;
+
 const ObjectBlockView = ({
   node,
   editor,
@@ -229,15 +305,53 @@ const ObjectBlockView = ({
   const type = node.attrs.type as ObjectType;
   const collapsed = Boolean(node.attrs.collapsed);
   let hasBody = false;
-  node.forEach((child) => {
-    if (!["objectTitle", "objectField"].includes(child.type.name))
-      hasBody = true;
-  });
   const pos = getPos();
-  const contexts = host.contexts(
-    id,
-    pos === undefined ? null : enclosingObjectId(editor, pos),
-  );
+  const implied =
+    pos === undefined ? [] : inheritedAt(editor.state.doc.resolve(pos), host);
+  /** 畳んでいる間、行末に出す値。Fieldの並び順のまま、値のあるものだけ。 */
+  const values: React.JSX.Element[] = [];
+  node.forEach((child, _offset, index) => {
+    if (child.type.name === "objectTitle") return;
+    if (!isField(child)) {
+      hasBody = true;
+      return;
+    }
+    const name = String(child.attrs.name);
+    if (child.attrs.fieldId === CONTEXT_FIELD.id) {
+      // 置かれた場所から自明なContextは出さない。
+      for (const contextId of contextRefs(node)) {
+        const context = host.lookup(contextId);
+        if (context && !implied.includes(contextId))
+          values.push(
+            <button
+              key={contextId}
+              type="button"
+              className="pe-context"
+              data-type={context.type}
+              data-color={typeOf(host, context.type)?.color ?? undefined}
+              onClick={() => host.open(contextId)}
+            >
+              {context.title}
+            </button>,
+          );
+      }
+      return;
+    }
+    let text = String(child.attrs.value ?? "");
+    child.forEach((inline) => {
+      text +=
+        inline.type.name === "objectRef"
+          ? `@${host.lookup(String(inline.attrs.objectId))?.title ?? "…"}`
+          : (inline.text ?? "");
+    });
+    if (text.trim())
+      values.push(
+        <span key={index} className="pe-value">
+          <small>{name}</small>
+          {text.trim()}
+        </span>,
+      );
+  });
   const definition = typeOf(host, type);
   const checkbox = definition?.checkbox ?? type === "task";
   const toggle = (): void => {
@@ -267,8 +381,6 @@ const ObjectBlockView = ({
       data-color={definition?.color ?? undefined}
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
-      // 種別はTitleの行末にタグとして出す。
-      style={{ "--pe-tag": JSON.stringify(`#${typeLabel(type)}`) }}
     >
       {/* Tanaと同じく、行頭に開閉と「開く」を置いて、マウスの移動を減らす。 */}
       <span className="pe-object-lead" contentEditable={false}>
@@ -301,18 +413,10 @@ const ObjectBlockView = ({
       </span>
       <NodeViewContent className="pe-object-content" />
       <span className="pe-object-side" contentEditable={false}>
-        {contexts.map((context) => (
-          <button
-            key={context.id}
-            type="button"
-            className="pe-context"
-            data-type={context.type}
-            data-color={typeOf(host, context.type)?.color ?? undefined}
-            onClick={() => host.open(context.id)}
-          >
-            {context.title}
-          </button>
-        ))}
+        {collapsed ? values.slice(0, SIDE_VALUES) : null}
+        {collapsed && values.length > SIDE_VALUES ? (
+          <span className="pe-value">+{values.length - SIDE_VALUES}</span>
+        ) : null}
       </span>
     </NodeViewWrapper>
   );
@@ -321,7 +425,7 @@ const ObjectBlockView = ({
 const ObjectBlock = Node.create({
   name: "objectBlock",
   group: "block",
-  content: "objectTitle objectField* block*",
+  content: "objectTitle field* block*",
   defining: true,
   addAttributes: () => ({
     objectId: { default: "" },
@@ -381,8 +485,7 @@ const ObjectBlock = Node.create({
             const start = $from.before(depth);
             const body: (typeof object)[] = [];
             object.forEach((child, _offset, index) => {
-              if (index > 0 && child.type.name !== "objectField")
-                body.push(child);
+              if (index > 0 && !isField(child)) body.push(child);
             });
             tr.replaceWith(start, start + object.nodeSize, [
               state.schema.nodes.paragraph!.create(null, $from.parent.content),
@@ -396,6 +499,42 @@ const ObjectBlock = Node.create({
     };
   },
 });
+
+/** 種別のタグをTitleの行末に置く。押すと種別のページを開く。 */
+const createTags = (host: RefObject<EditorHost>): Extension =>
+  Extension.create({
+    name: "objectTags",
+    addProseMirrorPlugins: () => [
+      new Plugin({
+        props: {
+          decorations: (state) => {
+            const tags: Decoration[] = [];
+            state.doc.descendants((node, pos) => {
+              if (node.type.name !== "objectBlock") return;
+              const type = String(node.attrs.type);
+              tags.push(
+                Decoration.widget(
+                  pos + node.firstChild!.nodeSize,
+                  () => {
+                    const tag = document.createElement("button");
+                    tag.type = "button";
+                    tag.className = "pe-tag";
+                    tag.contentEditable = "false";
+                    tag.textContent = `#${typeLabel(type)}`;
+                    tag.onmousedown = (event) => event.preventDefault();
+                    tag.onclick = () => host.current.openType(type);
+                    return tag;
+                  },
+                  { side: 1, key: `tag-${type}`, ignoreSelection: true },
+                ),
+              );
+            });
+            return DecorationSet.create(state.doc, tags);
+          },
+        },
+      }),
+    ],
+  });
 
 /**
  * 畳んだObjectの見えていない行と、Fieldの行のすき間へ、カーソルが入らないようにする。
@@ -411,7 +550,7 @@ const CollapsedGuard = Extension.create({
         if (
           newState.selection instanceof GapCursor &&
           [$head.nodeBefore, $head.nodeAfter].some(
-            (node) => node?.type.name === "objectField",
+            (node) => node && isField(node),
           )
         )
           return newState.tr.setSelection(
@@ -526,25 +665,42 @@ const convertBlock = (
       const $pos = tr.selection.$from;
       const block = $pos.parent;
       const depth = $pos.depth;
-      const { objectBlock, objectTitle, objectField, objectRef, paragraph } =
-        state.schema.nodes;
+      const {
+        objectBlock,
+        objectTitle,
+        objectField,
+        objectFieldControl,
+        objectRef,
+        paragraph,
+      } = state.schema.nodes;
       if (block.type !== paragraph || depth < 1) return false;
       const index = $pos.index(depth - 1);
       // リスト項目の先頭段落など、Objectを置けない場所では変換しない。
       if (!$pos.node(depth - 1).canReplaceWith(index, index + 1, objectBlock!))
         return false;
       // Fieldの行は作成時に並べる。Contextには置かれた場所から継ぐ値を入れる。
-      const fields = (typeOf(host, type)?.fields ?? [CONTEXT_FIELD]).map(
-        (field) =>
-          objectField!.create(
-            { fieldId: field.id, name: field.name },
-            field.kind === "context"
-              ? inheritedAt($pos, host).flatMap((objectId) => [
-                  objectRef!.create({ objectId }),
-                  state.schema.text(" "),
-                ])
-              : null,
-          ),
+      const definition = typeOf(host, type);
+      const fields = (
+        definition
+          ? [...definition.fields, ...definition.inherited]
+          : [CONTEXT_FIELD]
+      ).map((field) =>
+        field.kind === "date" || field.kind === "select"
+          ? objectFieldControl!.create({
+              fieldId: field.id,
+              name: field.name,
+              kind: field.kind,
+              options: field.options ?? [],
+            })
+          : objectField!.create(
+              { fieldId: field.id, name: field.name },
+              field.kind === "context"
+                ? inheritedAt($pos, host).flatMap((objectId) => [
+                    objectRef!.create({ objectId }),
+                    state.schema.text(" "),
+                  ])
+                : null,
+            ),
       );
       const object = objectBlock!.create({ objectId: newId(), type }, [
         objectTitle!.create(null, block.content),
@@ -722,8 +878,10 @@ export const ObjectEditor = ({
       ObjectRef,
       ObjectTitle,
       ObjectField,
+      ObjectFieldControl,
       ObjectBlock,
       CollapsedGuard,
+      createTags(hostRef),
       createMenus(bridge, hostRef),
     ],
     content: initialDoc as JSONContent,

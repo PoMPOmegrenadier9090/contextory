@@ -584,3 +584,21 @@
   display: inline-flex;
   margin: 0 0 16px;
 }
+
+.od-type-option + .od-type-option {
+  margin-left: 16px;
+}
+
+.od-demo .od-type-option select {
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 13px !important;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line);
+  border-radius: 6px;
+}
+
+.od-demo .od-fields .od-field-options {
+  flex: 1;
+  min-width: 0;
+}

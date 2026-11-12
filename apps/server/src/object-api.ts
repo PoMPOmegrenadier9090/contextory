@@ -102,6 +102,9 @@ export const registerObjectRoutes = (
       ...(typeof body.checkbox === "boolean"
         ? { checkbox: body.checkbox }
         : {}),
+      ...(typeof body.extends === "string" || body.extends === null
+        ? { extends: body.extends }
+        : {}),
       ...(Array.isArray(body.fields)
         ? {
             fields: (body.fields as unknown[]).map((value) => {
@@ -110,6 +113,13 @@ export const registerObjectRoutes = (
                 id: requireString(field.id, "id"),
                 name: requireString(field.name, "name"),
                 kind: requireString(field.kind, "kind") as FieldKind,
+                ...(Array.isArray(field.options)
+                  ? {
+                      options: (field.options as unknown[]).map((option) =>
+                        requireString(option, "option"),
+                      ),
+                    }
+                  : {}),
               };
             }),
           }

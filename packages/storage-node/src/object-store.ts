@@ -28,7 +28,7 @@ import {
   type TypeDefinition,
 } from "@pkm/core";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 3;
+export const OBJECT_STORE_SCHEMA_VERSION = 4;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
@@ -60,7 +60,8 @@ interface ObjectRow {
 interface MentionRow {
   readonly host_id: string;
   readonly unit_id: string;
-  readonly unit_kind: "object" | "listItem" | "section" | "block";
+  /** field: Fieldの値での言及。unit_idは"field:"とFieldのID */
+  readonly unit_kind: "object" | "field" | "listItem" | "section" | "block";
   readonly target_id: string;
   readonly unit: string;
   readonly time: number;
@@ -175,6 +176,11 @@ export class ObjectStore {
           UPDATE types SET checkbox = 1 WHERE name = 'task';
         `);
         this.database.pragma("user_version = 3");
+      })();
+    if (version < 4)
+      this.database.transaction(() => {
+        this.database.exec("ALTER TABLE fields ADD COLUMN options TEXT");
+        this.database.pragma("user_version = 4");
       })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
   }
@@ -293,16 +299,52 @@ export class ObjectStore {
       .run(name, name === "task" ? 1 : 0, now);
   }
 
-  /** 種別のField。Contextは保存が無くても先頭に持つ。 */
-  private fieldsOf(type: ObjectType): FieldDefinition[] {
-    const fields = this.database
-      .prepare(
-        "SELECT id, name, kind FROM fields WHERE type = ? ORDER BY position",
-      )
-      .all(type) as FieldDefinition[];
+  /** 種別が自分で持つField。Contextは保存が無くても先頭に持つ。 */
+  private ownFields(type: ObjectType): FieldDefinition[] {
+    const fields = (
+      this.database
+        .prepare(
+          "SELECT id, name, kind, options FROM fields WHERE type = ? ORDER BY position",
+        )
+        .all(type) as (FieldDefinition & { options: string | null })[]
+    ).map(({ options, ...field }) => ({
+      ...field,
+      ...(options ? { options: JSON.parse(options) as string[] } : {}),
+    }));
     return fields.some((field) => field.id === CONTEXT_FIELD.id)
       ? fields
       : [CONTEXT_FIELD, ...fields];
+  }
+
+  /** 継承元を近い順に辿る。循環していても止まる。 */
+  private ancestors(type: ObjectType): ObjectType[] {
+    const chain: ObjectType[] = [];
+    let current: ObjectType | null = type;
+    while (current !== null) {
+      current =
+        (this.database
+          .prepare("SELECT extends FROM types WHERE name = ?")
+          .pluck()
+          .get(current) as string | null | undefined) ?? null;
+      if (current === null || current === type || chain.includes(current))
+        break;
+      chain.push(current);
+    }
+    return chain;
+  }
+
+  /** 継承元から引き継ぐField。遠い継承元のものを先に並べる。 */
+  private inheritedFields(type: ObjectType): FieldDefinition[] {
+    return this.ancestors(type)
+      .reverse()
+      .flatMap((ancestor) =>
+        this.ownFields(ancestor).filter((f) => f.id !== CONTEXT_FIELD.id),
+      );
+  }
+
+  /** Objectに並ぶField。自分のFieldの後ろに、引き継いだFieldが続く。 */
+  private fieldsOf(type: ObjectType): FieldDefinition[] {
+    return [...this.ownFields(type), ...this.inheritedFields(type)];
   }
 
   /** 文書木に並べるField行。Contextは参照チップの並びにする。 */
@@ -319,6 +361,8 @@ export class ObjectStore {
     return this.fieldsOf(row.type).map((field) => ({
       id: field.id,
       name: field.name,
+      kind: field.kind,
+      ...(field.options ? { options: field.options } : {}),
       value:
         field.kind === "context"
           ? this.contextsOf(row.id).flatMap((objectId): DocNode[] => [
@@ -399,6 +443,20 @@ export class ObjectStore {
       : [];
     for (const target of whole)
       mention.run(hostId, hostId, "object", target, "", row!.created_at);
+    // Fieldの値での言及は、どのFieldかを添えてObject全体として届ける。
+    if (row)
+      for (const value of this.database
+        .prepare("SELECT field_id, value FROM field_values WHERE object_id = ?")
+        .all(hostId) as { field_id: string; value: string }[])
+        for (const target of refIds(nodes(value.value)))
+          mention.run(
+            hostId,
+            `field:${value.field_id}`,
+            "field",
+            target,
+            "",
+            row.created_at,
+          );
     if (row?.type === "memo") return;
     collectMentionUnits(body).forEach((unit, index) => {
       const id = unit.node.attrs?.id;
@@ -662,9 +720,14 @@ export class ObjectStore {
   types(): TypeDefinition[] {
     const rows = this.database
       .prepare(
-        "SELECT name, color, checkbox FROM types ORDER BY created_at, name",
+        "SELECT name, color, checkbox, extends FROM types ORDER BY created_at, name",
       )
-      .all() as { name: string; color: string | null; checkbox: number }[];
+      .all() as {
+      name: string;
+      color: string | null;
+      checkbox: number;
+      extends: string | null;
+    }[];
     const builtins: readonly string[] = OBJECT_TYPES;
     const order = (name: string): number =>
       builtins.includes(name) ? builtins.indexOf(name) : builtins.length;
@@ -675,7 +738,9 @@ export class ObjectStore {
         color: row.color,
         builtin: builtins.includes(row.name),
         checkbox: row.checkbox === 1,
-        fields: this.fieldsOf(row.name),
+        fields: this.ownFields(row.name),
+        extends: row.extends,
+        inherited: this.inheritedFields(row.name),
       }));
   }
 
@@ -686,6 +751,7 @@ export class ObjectStore {
       readonly name?: string;
       readonly color?: string | null;
       readonly checkbox?: boolean;
+      readonly extends?: string | null;
       readonly fields?: readonly FieldDefinition[];
     },
   ): TypeDefinition {
@@ -710,6 +776,24 @@ export class ObjectStore {
         this.database
           .prepare("UPDATE types SET checkbox = ? WHERE name = ?")
           .run(patch.checkbox ? 1 : 0, name);
+      if (patch.extends !== undefined) {
+        const exists =
+          patch.extends === null ||
+          this.database
+            .prepare("SELECT 1 FROM types WHERE name = ?")
+            .get(patch.extends);
+        // 自分自身や、自分を継承している種別は継承元にできない。
+        if (
+          !exists ||
+          patch.extends === name ||
+          (patch.extends !== null &&
+            this.ancestors(patch.extends).includes(name))
+        )
+          throw new TypeError("type cannot extend that type");
+        this.database
+          .prepare("UPDATE types SET extends = ? WHERE name = ?")
+          .run(patch.extends, name);
+      }
       if (patch.fields) {
         const rest = patch.fields.filter((f) => f.id !== CONTEXT_FIELD.id);
         const fields = patch.fields.some((f) => f.id === CONTEXT_FIELD.id)
@@ -736,12 +820,29 @@ export class ObjectStore {
                AND field_id NOT IN (SELECT value FROM json_each(?))`,
           )
           .run(name, kept);
+        this.database
+          .prepare(
+            `DELETE FROM mentions
+             WHERE unit_kind = 'field'
+               AND substr(unit_id, 7) IN (SELECT id FROM fields WHERE type = ?)
+               AND substr(unit_id, 7) NOT IN (SELECT value FROM json_each(?))`,
+          )
+          .run(name, kept);
         this.database.prepare("DELETE FROM fields WHERE type = ?").run(name);
         const insert = this.database.prepare(
-          "INSERT INTO fields (type, id, name, kind, position) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO fields (type, id, name, kind, position, options) VALUES (?, ?, ?, ?, ?, ?)",
         );
         fields.forEach((field, position) =>
-          insert.run(name, field.id, field.name.trim(), field.kind, position),
+          insert.run(
+            name,
+            field.id,
+            field.name.trim(),
+            field.kind,
+            position,
+            field.kind === "select" && field.options?.length
+              ? JSON.stringify(field.options)
+              : null,
+          ),
         );
       }
       if (patch.name !== undefined && patch.name !== name) {
@@ -755,6 +856,7 @@ export class ObjectStore {
         for (const sql of [
           "UPDATE types SET name = ? WHERE name = ?",
           "UPDATE fields SET type = ? WHERE type = ?",
+          "UPDATE types SET extends = ? WHERE extends = ?",
           "UPDATE objects SET type = ? WHERE type = ?",
         ])
           this.database.prepare(sql).run(next, name);
@@ -837,12 +939,20 @@ export class ObjectStore {
           : [row.target_id, ...pathFrom(row.target_id)],
       );
       const host = this.row(row.host_id);
-      if (row.unit_kind === "object") {
+      if (row.unit_kind === "object" || row.unit_kind === "field") {
+        const field =
+          row.unit_kind === "field"
+            ? (this.database
+                .prepare("SELECT name FROM fields WHERE id = ?")
+                .pluck()
+                .get(row.unit_id.slice("field:".length)) as string | undefined)
+            : undefined;
         if (host)
           entries.push({
             kind: "object",
             object: this.summary(host),
             mentioned: true,
+            ...(field ? { field } : {}),
             via,
             time: row.time,
           });

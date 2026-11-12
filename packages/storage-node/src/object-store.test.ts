@@ -263,6 +263,71 @@ describe("ObjectStore", () => {
     expect(() => store.updateType("nope", {})).toThrow(ObjectStoreError);
   });
 
+  it("stores control fields, inherits fields and delivers field mentions", () => {
+    store.savePage(DAILY, doc(block("mtg", "会議", "定例")), 10);
+    store.updateType("会議", {
+      fields: [
+        { id: "when", name: "日付", kind: "date" },
+        { id: "state", name: "状態", kind: "select", options: ["予定", "済"] },
+      ],
+    });
+    store.savePage(DAILY, doc(block("sub", "1on1", "面談")), 11);
+    store.updateType("1on1", {
+      extends: "会議",
+      fields: [{ id: "who", name: "相手", kind: "reference" }],
+    });
+    expect(store.types().find((type) => type.name === "1on1")).toMatchObject({
+      extends: "会議",
+      fields: [{ id: "context" }, { id: "who" }],
+      inherited: [{ id: "when" }, { id: "state", options: ["予定", "済"] }],
+    });
+    expect(() => store.updateType("会議", { extends: "1on1" })).toThrow(
+      TypeError,
+    );
+
+    const control = (fieldId: string, value: string): DocNode => ({
+      type: "objectFieldControl",
+      attrs: { fieldId, value },
+    });
+    store.savePage(
+      DAILY,
+      doc(
+        block("mtg", "会議", "定例"),
+        block(
+          "sub",
+          "1on1",
+          "面談",
+          field("who", ref("task")),
+          control("when", "2026-11-20"),
+          control("state", "予定"),
+        ),
+      ),
+      12,
+    );
+    const rows = store
+      .loadPage(DAILY)
+      .doc.content?.[1]?.content?.map((node) => [node.type, node.attrs]);
+    expect(rows?.slice(1)).toMatchObject([
+      ["objectField", { fieldId: "context" }],
+      ["objectField", { fieldId: "who" }],
+      ["objectFieldControl", { fieldId: "when", value: "2026-11-20" }],
+      [
+        "objectFieldControl",
+        { fieldId: "state", value: "予定", options: ["予定", "済"] },
+      ],
+    ]);
+    // Fieldの値で指したObjectのTimelineに、Fieldの名前付きで届く。
+    const fieldMentions = (): unknown[] =>
+      store
+        .timeline("task")
+        .filter((entry) => entry.kind === "object" && entry.field);
+    expect(fieldMentions()).toMatchObject([
+      { object: { id: "sub" }, mentioned: true, field: "相手" },
+    ]);
+    store.updateType("1on1", { fields: [] });
+    expect(fieldMentions()).toEqual([]);
+  });
+
   it("refuses contexts that would create a cycle and unknown hosts", () => {
     expect(() => store.addContext("area", "task")).toThrow("cycle");
     expect(() => store.loadPage("missing")).toThrow(ObjectStoreError);

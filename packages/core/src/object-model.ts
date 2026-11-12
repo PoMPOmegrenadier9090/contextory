@@ -21,13 +21,21 @@ export const normalizeObjectType = (value: unknown): ObjectType | null => {
   );
 };
 
-export const FIELD_KINDS = ["context", "text", "reference"] as const;
+export const FIELD_KINDS = [
+  "context",
+  "text",
+  "reference",
+  "date",
+  "select",
+] as const;
 export type FieldKind = (typeof FIELD_KINDS)[number];
 
 export interface FieldDefinition {
   readonly id: string;
   readonly name: string;
   readonly kind: FieldKind;
+  /** selectの選択肢 */
+  readonly options?: readonly string[];
 }
 
 /** すべての種別が持つField。値はContextそのもので、推移的に収集される。 */
@@ -53,8 +61,12 @@ export interface TypeDefinition {
   readonly builtin: boolean;
   /** 行頭に完了のチェックボックスを出すか。 */
   readonly checkbox: boolean;
-  /** 表示順。上にあるものほど優先して見せる。 */
+  /** この種別が自分で持つField。表示順で、上にあるものほど優先して見せる。 */
   readonly fields: readonly FieldDefinition[];
+  /** Fieldを引き継ぐ元の種別 */
+  readonly extends: ObjectType | null;
+  /** 継承元から引き継いだField。自分のFieldの後ろに並ぶ。 */
+  readonly inherited: readonly FieldDefinition[];
 }
 
 /** Objectは独立した本文を持ち、文書には埋め込みBlockとして置かれる。 */
@@ -93,6 +105,8 @@ export type ObjectTimelineEntry =
       readonly object: ObjectSummary;
       /** Contextで属するのではなく、@で言及しているだけ */
       readonly mentioned: boolean;
+      /** Fieldの値で言及している場合の、Fieldの名前 */
+      readonly field?: string;
       readonly via: readonly string[];
       readonly time: number;
     }

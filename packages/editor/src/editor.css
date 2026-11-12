@@ -232,18 +232,25 @@
   padding: 3px 0;
 }
 
-/* 種別は行末のタグで示す。入れ子のObjectは、自分を包む最も内側の値を使う。 */
-.pe-object [data-object-title]::after {
+/* 種別は行末のタグで示す。押すと種別のページを開く。 */
+.pe-editor .pe-tag {
   margin-left: 8px;
   padding: 1px 6px;
   color: var(--pe-type);
+  font: inherit;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.5;
   white-space: nowrap;
-  text-decoration: none;
   background: color-mix(in srgb, var(--pe-type) 14%, transparent);
+  border: 0;
   border-radius: 5px;
-  content: var(--pe-tag);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pe-editor .pe-tag:hover {
+  background: color-mix(in srgb, var(--pe-type) 26%, transparent);
 }
 
 .pe-object[data-done="true"] > .pe-object-content > [data-object-title],
@@ -272,6 +279,34 @@
   color: var(--pe-muted);
   font-size: 12px;
   content: attr(data-label);
+}
+
+/* 選ぶ型のField。文字の行と同じ高さに収める。 */
+.pe-editor [data-object-field] input,
+.pe-editor [data-object-field] select {
+  padding: 1px 6px;
+  color: inherit;
+  font: inherit;
+  font-size: 14px !important;
+  background: var(--pe-surface);
+  border: 1px solid var(--pe-line);
+  border-radius: 6px;
+}
+
+.pe-value {
+  max-width: 180px;
+  padding: 1px 6px;
+  overflow: hidden;
+  color: var(--pe-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-value small {
+  margin-right: 4px;
+  font-size: 11px;
+  opacity: 0.75;
 }
 
 .pe-object-side {

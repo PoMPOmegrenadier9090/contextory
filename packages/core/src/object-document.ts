@@ -11,8 +11,13 @@ export interface DocNode {
 export interface ObjectFieldContent {
   readonly id: string;
   readonly name: string;
+  /** dateとselectは、文字を打つ行ではなく選ぶ部品として並べる。 */
+  readonly kind?: string;
+  readonly options?: readonly string[];
   readonly value: readonly DocNode[];
 }
+
+const CONTROL_KINDS = ["date", "select"];
 
 /** 文書から切り出したObjectの中身。配置側の属性は含まない。 */
 export interface ObjectContent {
@@ -47,24 +52,45 @@ export const timeFromId = (id: unknown): number | null => {
   return match ? Number.parseInt(match[1]!, 16) : null;
 };
 
-export const fieldNode = (field: ObjectFieldContent): DocNode => ({
-  type: "objectField",
-  attrs: { fieldId: field.id, name: field.name },
-  ...(field.value.length ? { content: field.value } : {}),
-});
+export const fieldNode = (field: ObjectFieldContent): DocNode =>
+  CONTROL_KINDS.includes(field.kind ?? "")
+    ? {
+        type: "objectFieldControl",
+        attrs: {
+          fieldId: field.id,
+          name: field.name,
+          kind: field.kind,
+          options: field.options ?? [],
+          value: field.value.map((node) => node.text ?? "").join(""),
+        },
+      }
+    : {
+        type: "objectField",
+        attrs: { fieldId: field.id, name: field.name },
+        ...(field.value.length ? { content: field.value } : {}),
+      };
+
+const isField = (node: DocNode): boolean =>
+  node.type === "objectField" || node.type === "objectFieldControl";
 
 /** 子からField行を取り分ける。 */
 const takeFields = (
   children: readonly DocNode[],
 ): [ObjectFieldContent[], DocNode[]] => [
-  children
-    .filter((child) => child.type === "objectField")
-    .map((child) => ({
+  children.filter(isField).map((child) => {
+    const value = child.attrs?.value;
+    return {
       id: String(child.attrs?.fieldId),
       name: typeof child.attrs?.name === "string" ? child.attrs.name : "",
-      value: child.content ?? [],
-    })),
-  children.filter((child) => child.type !== "objectField"),
+      value:
+        child.type === "objectField"
+          ? (child.content ?? [])
+          : typeof value === "string" && value
+            ? [{ type: "text", text: value }]
+            : [],
+    };
+  }),
+  children.filter((child) => !isField(child)),
 ];
 
 /**
