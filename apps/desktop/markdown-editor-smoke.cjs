@@ -16,6 +16,7 @@ void app
     const scrollCheck = app.commandLine.hasSwitch("scroll");
     const relationsCheck = app.commandLine.hasSwitch("web-relations");
     const notificationsCheck = app.commandLine.hasSwitch("notifications");
+    const objectCheck = app.commandLine.hasSwitch("object-editor");
     const label = notificationsCheck
       ? "Notifications"
       : relationsCheck
@@ -69,6 +70,18 @@ void app
       : relationsCheck
         ? "runWebEntityRelationsBrowserChecks"
         : run;
+    const styles = objectCheck
+      ? 'import "/packages/ui/src/object-app.css"; import "/packages/editor/src/editor.css";'
+      : tableCheck || browserRun === "runMarkdownEditorBrowserChecks"
+        ? 'import "/apps/desktop/node_modules/@mantine/core/styles.css"; import "/apps/desktop/src/renderer.css"; import "/packages/ui/src/compact.css";'
+        : "";
+    const smoke = objectCheck
+      ? {
+          label: "Object editor",
+          module: "/packages/editor/src/object-editor.browser-test.tsx",
+          run: "runObjectEditorBrowserChecks",
+        }
+      : { label, module: browserModule, run: browserRun };
     const imagePolicy =
       imageCheck || timelineCheck
         ? readFileSync(path.join(app.getAppPath(), "index.html"), "utf8").match(
@@ -112,6 +125,7 @@ void app
           "apps/desktop/src/image.browser-test.tsx",
           "apps/web/src/web-app.browser-test.tsx",
           "apps/desktop/src/notifications.browser-test.tsx",
+          "packages/editor/src/object-editor.browser-test.tsx",
         ],
       },
       server: { host: "127.0.0.1", port: 0 },
@@ -142,7 +156,7 @@ void app
               if (imagePolicy)
                 response.setHeader("Content-Security-Policy", imagePolicy);
               response.end(
-                `<!doctype html><html><body><main id="editor"></main><script type="module">${tableCheck || browserRun === "runMarkdownEditorBrowserChecks" ? 'import "/apps/desktop/node_modules/@mantine/core/styles.css"; import "/apps/desktop/src/renderer.css"; import "/packages/ui/src/compact.css";' : ""}import { ${browserRun} } from "${browserModule}"; globalThis.editorChecks = ${browserRun}(document.getElementById("editor"), ${tableCheck || captureCheck || imageCheck || quickOpenCheck});</script></body></html>`,
+                `<!doctype html><html><body><main id="editor"></main><script type="module">${styles}import { ${smoke.run} } from "${smoke.module}"; globalThis.editorChecks = ${smoke.run}(document.getElementById("editor"), ${tableCheck || captureCheck || imageCheck || quickOpenCheck});</script></body></html>`,
               );
             });
           },
@@ -167,7 +181,7 @@ void app
         require("node:timers/promises")
           .setTimeout(60000, null, { ref: false })
           .then(() => {
-            throw new Error(`${label} browser checks timed out`);
+            throw new Error(`${smoke.label} browser checks timed out`);
           }),
       ]);
       if (
@@ -177,8 +191,62 @@ void app
         typeof result.checks !== "number"
       )
         throw new Error("Editor browser checks did not load");
-      console.log(`${label} browser smoke passed: ${result.checks} checks`);
+      console.log(
+        `${smoke.label} browser smoke passed: ${result.checks} checks`,
+      );
+      if (objectCheck) {
+        window.webContents.debugger.attach("1.3");
+        try {
+          const assert = require("node:assert/strict");
+          for (const [index, expected] of [
+            "短いタイトル追記",
+            "追記",
+          ].entries()) {
+            const title = `document.querySelectorAll("[data-object-title]")[${index}]`;
+            /** @type {unknown} */
+            const point = await window.webContents.executeJavaScript(
+              `(() => {
+                const tag = document.querySelectorAll(".pe-tag")[${index}].getBoundingClientRect();
+                return { x: Math.ceil(tag.right) + 4, y: tag.top + tag.height / 2 };
+              })()`,
+            );
+            assert.ok(point && typeof point === "object");
+            assert.ok("x" in point && typeof point.x === "number");
+            assert.ok("y" in point && typeof point.y === "number");
+            const { x, y } = point;
+            for (const type of ["mousePressed", "mouseReleased"])
+              await window.webContents.debugger.sendCommand(
+                "Input.dispatchMouseEvent",
+                { type, x, y, button: "left", clickCount: 1 },
+              );
+            assert.equal(
+              await window.webContents.executeJavaScript(
+                `${title}.contains(getSelection().anchorNode)`,
+              ),
+              true,
+              "Caret must stay before the tag",
+            );
+            await window.webContents.debugger.sendCommand("Input.insertText", {
+              text: "追記",
+            });
+            assert.equal(
+              await window.webContents.executeJavaScript(
+                `${title}.textContent`,
+              ),
+              expected,
+            );
+          }
+          const capture = process.env.PKM_OBJECT_SMOKE_SCREENSHOT;
+          if (capture) {
+            const image = await window.capturePage();
+            require("node:fs").writeFileSync(capture, image.toPNG());
+          }
+        } finally {
+          window.webContents.debugger.detach();
+        }
+      }
       if (
+        !objectCheck &&
         !imageCheck &&
         !appearanceCheck &&
         !commandsCheck &&

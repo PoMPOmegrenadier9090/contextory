@@ -6,7 +6,6 @@ import {
   type ResolvedPos,
 } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
   EditorContent,
   Extension,
@@ -32,6 +31,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type MouseEvent,
   type RefObject,
 } from "react";
 import {
@@ -170,12 +170,55 @@ const ObjectRef = Node.create({
   addNodeView: () => ReactNodeViewRenderer(RefChip, { as: "span" }),
 });
 
+const ObjectTitleView = ({
+  editor,
+  getPos,
+  node,
+}: NodeViewProps): React.JSX.Element => {
+  const host = useHost();
+  const pos = getPos();
+  const type =
+    pos === undefined
+      ? null
+      : (editor.state.doc.resolve(pos).parent.attrs.type as ObjectType);
+  return (
+    <NodeViewWrapper
+      className="pe-object-title"
+      onMouseDown={(event: MouseEvent<HTMLDivElement>) => {
+        if (event.button !== 0 || event.target !== event.currentTarget) return;
+        const start = getPos();
+        if (start === undefined) return;
+        // タグの脇にある余白をクリックしたときは、タイトルの末尾へ戻す。
+        event.preventDefault();
+        editor.commands.setTextSelection(start + node.nodeSize - 1);
+        editor.view.focus();
+      }}
+    >
+      <NodeViewContent<"span"> as="span" data-object-title="" />
+      {type ? (
+        <span contentEditable={false}>
+          <button
+            type="button"
+            className="pe-tag"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => host.openType(type)}
+          >
+            #{typeLabel(type)}
+          </button>
+        </span>
+      ) : null}
+    </NodeViewWrapper>
+  );
+};
+
 const ObjectTitle = Node.create({
   name: "objectTitle",
   content: "inline*",
   defining: true,
   parseHTML: () => [{ tag: "div[data-object-title]" }],
   renderHTML: () => ["div", { "data-object-title": "" }, 0],
+  addNodeView: () =>
+    ReactNodeViewRenderer(ObjectTitleView, { contentDOMElementTag: "span" }),
 });
 
 /** 文書の先頭にも、開いているObject自身のFieldを並べられるようにする。 */
@@ -392,8 +435,7 @@ const ObjectBlockView = ({
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
     >
-      {/* 行頭は開閉と完了だけにして、Titleの開始位置を本文へ近づける。 */}
-      <span className="pe-object-lead" contentEditable={false}>
+      <span className="pe-object-gutter" contentEditable={false}>
         <button
           type="button"
           className="pe-toggle"
@@ -406,6 +448,13 @@ const ObjectBlockView = ({
             <path d="M6 4l4 4-4 4" />
           </svg>
         </button>
+        <button
+          type="button"
+          className="pe-object-open"
+          aria-label="Objectを開く"
+          title="Objectを開く"
+          onClick={() => host.open(id)}
+        />
         {checkbox ? (
           <input
             type="checkbox"
@@ -416,19 +465,14 @@ const ObjectBlockView = ({
         ) : null}
       </span>
       <NodeViewContent className="pe-object-content" />
-      <span className="pe-object-side" contentEditable={false}>
-        <button
-          type="button"
-          className="pe-bullet"
-          data-has-body={hasBody}
-          aria-label="Objectを開く"
-          onClick={() => host.open(id)}
-        />
-        {collapsed ? values.slice(0, SIDE_VALUES) : null}
-        {collapsed && values.length > SIDE_VALUES ? (
-          <span className="pe-value">+{values.length - SIDE_VALUES}</span>
-        ) : null}
-      </span>
+      {collapsed && values.length ? (
+        <span className="pe-object-side" contentEditable={false}>
+          {values.slice(0, SIDE_VALUES)}
+          {values.length > SIDE_VALUES ? (
+            <span className="pe-value">+{values.length - SIDE_VALUES}</span>
+          ) : null}
+        </span>
+      ) : null}
     </NodeViewWrapper>
   );
 };
@@ -525,42 +569,6 @@ const ObjectBlock = Node.create({
     };
   },
 });
-
-/** 種別のタグをTitleの行末に置く。押すと種別のページを開く。 */
-const createTags = (host: RefObject<EditorHost>): Extension =>
-  Extension.create({
-    name: "objectTags",
-    addProseMirrorPlugins: () => [
-      new Plugin({
-        props: {
-          decorations: (state) => {
-            const tags: Decoration[] = [];
-            state.doc.descendants((node, pos) => {
-              if (node.type.name !== "objectBlock") return;
-              const type = String(node.attrs.type);
-              tags.push(
-                Decoration.widget(
-                  pos + node.firstChild!.nodeSize,
-                  () => {
-                    const tag = document.createElement("button");
-                    tag.type = "button";
-                    tag.className = "pe-tag";
-                    tag.contentEditable = "false";
-                    tag.textContent = `#${typeLabel(type)}`;
-                    tag.onmousedown = (event) => event.preventDefault();
-                    tag.onclick = () => host.current.openType(type);
-                    return tag;
-                  },
-                  { side: -1, key: `tag-${type}`, ignoreSelection: true },
-                ),
-              );
-            });
-            return DecorationSet.create(state.doc, tags);
-          },
-        },
-      }),
-    ],
-  });
 
 /**
  * 畳んだObjectの見えていない行と、Fieldの行のすき間へ、カーソルが入らないようにする。
@@ -1026,7 +1034,6 @@ export const ObjectEditor = ({
       ObjectFieldControl,
       ObjectBlock,
       CollapsedGuard,
-      createTags(hostRef),
       createMenus(bridge, hostRef),
     ],
     content: initialDoc as JSONContent,
