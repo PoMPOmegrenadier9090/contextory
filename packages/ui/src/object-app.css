@@ -514,6 +514,26 @@ body,
   font-size: 12px;
 }
 
+.od-conflict {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--od-decision);
+  border-radius: 8px;
+  background: var(--od-decision-soft);
+}
+
+.od-conflict p {
+  margin: 0;
+}
+
+.od-conflict div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .od-empty {
   margin: 0;
   color: var(--od-muted);

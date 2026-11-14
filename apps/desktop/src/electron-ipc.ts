@@ -26,11 +26,14 @@ export const registerDesktopIpc = ({
   client,
   connection,
 }: DesktopServices): (() => void) => {
-  const savePage = (hostId: unknown, request: unknown) =>
-    client().savePage(
+  const savePage = (hostId: unknown, request: unknown) => {
+    const { doc, baseRevision } = parseObjectPageSave(request);
+    return client().savePage(
       requireRequestString(hostId, "hostId"),
-      parseObjectPageSave(request),
+      doc,
+      baseRevision,
     );
+  };
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectLoadPage, (_event, hostId) =>
     client().loadPage(requireRequestString(hostId, "hostId")),
   );
@@ -45,13 +48,14 @@ export const registerDesktopIpc = ({
       void Promise.resolve()
         .then(() => savePage(hostId, request))
         .then(
-          () => {
-            event.returnValue = null;
+          (page) => {
+            event.returnValue = { page };
           },
           (error: unknown) => {
             console.error("Object page could not be saved on close", error);
-            event.returnValue =
-              error instanceof Error ? error.message : String(error);
+            event.returnValue = {
+              error: error instanceof Error ? error.message : String(error),
+            };
           },
         );
     },

@@ -24,9 +24,11 @@ export interface ObjectTypePatch {
 /** WebとDesktopが共有するObject保存境界。 */
 export interface ObjectClient {
   loadPage(hostId: string): Promise<ObjectPage>;
+  /** baseRevisionがnullなら、他での変更を確かめずに上書きする。 */
   savePage(
     hostId: string,
     doc: DocNode,
+    baseRevision: string | null,
     keepalive?: boolean,
   ): Promise<ObjectPage>;
   searchObjects(

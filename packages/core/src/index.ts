@@ -20,7 +20,9 @@ export {
   FIELD_KINDS,
   inheritedContexts,
   inlineText,
+  isPageConflict,
   normalizeObjectType,
+  PAGE_CONFLICT,
   OBJECT_TYPES,
   TYPE_COLORS,
 } from "./object-model.js";

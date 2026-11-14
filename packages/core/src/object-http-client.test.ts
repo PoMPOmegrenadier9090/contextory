@@ -15,6 +15,7 @@ describe("HTTP Object client", () => {
     await createHttpObjectClient().savePage(
       "daily:2026-11-12",
       { type: "doc" },
+      "r1",
       true,
     );
 
@@ -23,7 +24,7 @@ describe("HTTP Object client", () => {
       keepalive: true,
       redirect: "manual",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ doc: { type: "doc" } }),
+      body: JSON.stringify({ doc: { type: "doc" }, baseRevision: "r1" }),
     });
   });
 

@@ -23,8 +23,13 @@ describe("Object request validation", () => {
       parentId: null,
     });
     expect(parseObjectPageSave({ doc: { type: "doc" } })).toEqual({
-      type: "doc",
+      doc: { type: "doc" },
+      baseRevision: null,
     });
+    expect(
+      parseObjectPageSave({ doc: { type: "doc" }, baseRevision: "r1" })
+        .baseRevision,
+    ).toBe("r1");
     expect(parseObjectOverviewRange({ from: "10", to: 20 })).toEqual({
       from: 10,
       to: 20,
@@ -34,6 +39,9 @@ describe("Object request validation", () => {
   it("rejects invalid types, documents, ranges and fields", () => {
     expect(() => parseObjectCreate({ id: "x", type: "not valid" })).toThrow();
     expect(() => parseObjectPageSave({ doc: { type: "paragraph" } })).toThrow();
+    expect(() =>
+      parseObjectPageSave({ doc: { type: "doc" }, baseRevision: 1 }),
+    ).toThrow();
     expect(() => parseObjectOverviewRange({ from: 20, to: 10 })).toThrow();
     expect(() =>
       parseObjectTypePatch({

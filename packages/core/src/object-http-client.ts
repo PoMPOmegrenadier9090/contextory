@@ -58,11 +58,11 @@ export const createHttpObjectClient = ({
   return {
     loadPage: (hostId) =>
       request<ObjectPage>("GET", `/pages/${encode(hostId)}`),
-    savePage: (hostId, doc, keepalive = false) =>
+    savePage: (hostId, doc, baseRevision, keepalive = false) =>
       request<ObjectPage>(
         "PUT",
         `/pages/${encode(hostId)}`,
-        { doc },
+        { doc, baseRevision },
         keepalive,
       ),
     searchObjects: (query, exclude = null) =>

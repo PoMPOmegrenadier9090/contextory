@@ -139,4 +139,36 @@ describe("object API", () => {
       ).statusCode,
     ).toBe(400);
   });
+
+  it("answers 409 when the page changed since it was opened", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
+    directories.push(parent);
+    const app = await open(parent);
+    const url = "/api/next/pages/daily%3A2026-11-14";
+    const opened = (await app.inject({ url })).json<ObjectPage>();
+    const save = (text: string, baseRevision: string) =>
+      app.inject({
+        method: "PUT",
+        url,
+        payload: {
+          doc: {
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                attrs: { id: "p" },
+                content: [{ type: "text", text }],
+              },
+            ],
+          },
+          baseRevision,
+        },
+      });
+    expect((await save("一台目", opened.revision)).statusCode).toBe(200);
+    const stale = await save("二台目", opened.revision);
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json<{ message: string }>().message).toContain(
+      "PAGE_CONFLICT",
+    );
+  });
 });

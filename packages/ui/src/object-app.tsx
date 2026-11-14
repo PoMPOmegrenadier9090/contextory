@@ -1,5 +1,6 @@
 import {
   inheritedContexts,
+  isPageConflict,
   newId,
   TYPE_COLORS,
   type DocNode,
@@ -328,6 +329,16 @@ export const ObjectApp = ({
   const timer = useRef<number | undefined>(undefined);
   const loads = useRef(0);
   const started = useRef(false);
+  /** 最後に読み書きした文書の版。保存時に、他で変わっていないかを確かめる。 */
+  const revision = useRef<{ hostId: string; value: string } | null>(null);
+  /** 他で変わっていて保存を断られた文書。ユーザーが上書きか読み直しを選ぶ。 */
+  const [conflict, setConflict] = useState<{
+    readonly hostId: string;
+    readonly doc: DocNode;
+  } | null>(null);
+  // 版を知らない文書は、空の版で送って必ず確かめさせる。
+  const baseFor = (hostId: string): string =>
+    revision.current?.hostId === hostId ? revision.current.value : "";
 
   const page = loaded?.hostId ?? null;
   const current = page === null ? undefined : objects[page];
@@ -340,7 +351,13 @@ export const ObjectApp = ({
     queue.current = run.then(
       () => setStatus("saved"),
       (error: unknown) =>
-        setStatus(error instanceof Error ? error.message : String(error)),
+        setStatus(
+          isPageConflict(error)
+            ? "別の画面で更新されています"
+            : error instanceof Error
+              ? error.message
+              : String(error),
+        ),
     );
     return queue.current;
   };
@@ -372,8 +389,12 @@ export const ObjectApp = ({
     pending.current = null;
     void enqueue(async () => {
       const result = await client
-        .savePage(save.hostId, save.doc)
+        .savePage(save.hostId, save.doc, baseFor(save.hostId))
         .catch((error: unknown) => {
+          if (isPageConflict(error)) {
+            setConflict(save);
+            throw error;
+          }
           // 送れなかった文書は、新しい入力が無ければそのまま送り直す。
           if (pending.current === null) {
             pending.current = save;
@@ -381,15 +402,43 @@ export const ObjectApp = ({
           }
           throw error;
         });
+      revision.current = { hostId: save.hostId, value: result.revision };
       merge(result.objects);
       await refreshSide(save.hostId);
     });
+  };
+
+  /** 保存を断られた文書を、他での変更を確かめずに保存する。 */
+  const overwrite = (): void => {
+    if (!conflict) return;
+    window.clearTimeout(timer.current);
+    // 断られた後も入力していれば、その新しい方を送る。
+    const latest =
+      pending.current?.hostId === conflict.hostId ? pending.current : conflict;
+    pending.current = null;
+    setConflict(null);
+    void enqueue(async () => {
+      const result = await client.savePage(latest.hostId, latest.doc, null);
+      revision.current = { hostId: latest.hostId, value: result.revision };
+      merge(result.objects);
+      await refreshSide(latest.hostId);
+    });
+  };
+
+  /** この画面の変更を捨てて、保存されている内容を開き直す。 */
+  const reloadConflict = (): void => {
+    if (!conflict) return;
+    window.clearTimeout(timer.current);
+    pending.current = null;
+    open(conflict.hostId);
   };
 
   const open = (hostId: string): void => {
     flush();
     void enqueue(async () => {
       const result = await client.loadPage(hostId);
+      revision.current = { hostId, value: result.revision };
+      setConflict(null);
       merge(result.objects);
       const own = result.objects[hostId]?.title ?? "";
       setTitle(own === "無題" ? "" : own);
@@ -434,7 +483,8 @@ export const ObjectApp = ({
     // 閉じる直前の入力も、待たずに送る。
     const onHide = (): void => {
       const save = pending.current;
-      if (save) void client.savePage(save.hostId, save.doc, true);
+      if (save)
+        void client.savePage(save.hostId, save.doc, baseFor(save.hostId), true);
     };
     window.addEventListener("pagehide", onHide);
     return () => window.removeEventListener("pagehide", onHide);
@@ -843,6 +893,22 @@ export const ObjectApp = ({
                   </p>
                 </header>
               )}
+
+              {conflict && conflict.hostId === loaded?.hostId ? (
+                <div className="od-conflict" role="alert">
+                  <p>
+                    この文書は、別の端末や画面で更新されています。この画面の変更は、まだ保存していません。
+                  </p>
+                  <div>
+                    <button type="button" onClick={overwrite}>
+                      この画面の内容で上書き
+                    </button>
+                    <button type="button" onClick={reloadConflict}>
+                      保存されている内容を開く（この画面の変更は消えます）
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {loaded ? (
                 <section className="od-document">

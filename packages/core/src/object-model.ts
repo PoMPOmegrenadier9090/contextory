@@ -97,7 +97,16 @@ export interface ObjectPage {
   readonly doc: DocNode;
   /** 文書内のObject、参照先、それらのContext先 */
   readonly objects: Readonly<Record<string, ObjectSummary>>;
+  /** 開いた時点の文書の版。保存時に渡すと、他で変わっていれば保存を断る。 */
+  readonly revision: string;
 }
+
+/** 他の画面や端末で文書が変わっていて、保存を断ったことを示す。 */
+export const PAGE_CONFLICT = "PAGE_CONFLICT";
+
+/** IPCやHTTPを越えるとエラーの型が失われるので、文言で見分ける。 */
+export const isPageConflict = (error: unknown): boolean =>
+  error instanceof Error && error.message.includes(PAGE_CONFLICT);
 
 export type ObjectTimelineEntry =
   | {

@@ -10,6 +10,7 @@
 | 種別とFieldの決定事項                     | [種別とField](discussions/20261112_type-and-field-schema.md)                 |
 | Phase 3の要件と進め方                     | [Phase 3への引き継ぎ](discussions/20261112_phase3-handoff.md)                |
 | 正本の置き場所とアプリへの組み込み        | [Phase 3のアプリ統合](discussions/20261112_phase3-app-integration.md)        |
+| 保存の競合検出                            | [文書の保存に競合検出を入れる](discussions/20261114_page-conflict.md)        |
 | コードの責務と依存                        | [現在のコード構成](architecture.md)                                          |
 | 開発時の起動・検証・配布物の生成          | [開発・運用ガイド](development.md)                                           |
 | Docker ComposeとCloudflare Tunnelでの公開 | [サーバーのセットアップ](server-setup.md)                                    |

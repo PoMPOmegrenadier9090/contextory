@@ -137,6 +137,35 @@ describe("ObjectStore", () => {
     expect(store.getObject("shared").title).toBe("共有");
   });
 
+  it("refuses a save made from an outdated page", () => {
+    const opened = store.savePage(DAILY, doc(block("t", "task", "元")), 10);
+    // 埋め込んだTaskを、そのTask自身のページから書き換える。
+    const task = store.loadPage("t");
+    store.savePage(
+      "t",
+      doc(paragraph("p", text("別の端末"))),
+      11,
+      task.revision,
+    );
+
+    expect(() =>
+      store.savePage(
+        DAILY,
+        doc(block("t", "task", "古い")),
+        12,
+        opened.revision,
+      ),
+    ).toThrow(ObjectStoreError);
+    expect(store.getObject("t").title).toBe("元");
+
+    const latest = store.loadPage(DAILY);
+    expect(latest.revision).not.toBe(opened.revision);
+    store.savePage(DAILY, doc(block("t", "task", "新")), 13, latest.revision);
+    // nullなら確かめずに上書きする。
+    store.savePage(DAILY, doc(block("t", "task", "上書き")), 14, null);
+    expect(store.getObject("t").title).toBe("上書き");
+  });
+
   it("collects contexts and mentions transitively into the timeline", () => {
     const timeline = store
       .timeline("project")

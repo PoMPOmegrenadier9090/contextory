@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
@@ -12,6 +13,7 @@ import {
   joinDocument,
   normalizeObjectType,
   OBJECT_TYPES,
+  PAGE_CONFLICT,
   refIds,
   splitDocument,
   timeFromId,
@@ -36,7 +38,7 @@ const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
 export class ObjectStoreError extends Error {
   override readonly name = "ObjectStoreError";
   constructor(
-    readonly code: "OBJECT_NOT_FOUND" | "INVALID_CONTEXT",
+    readonly code: "OBJECT_NOT_FOUND" | "INVALID_CONTEXT" | "PAGE_CONFLICT",
     message: string,
   ) {
     super(message);
@@ -523,14 +525,16 @@ export class ObjectStore {
     // 文書内のObject、参照先、それらのContext先まで含める。
     for (const id of ids)
       for (const context of include(id)?.contexts ?? []) include(context);
-    return {
-      doc: joinDocument(
-        { type: "doc", content: [...hostFields, ...body] },
-        contents,
-        new Set([hostId]),
-      ),
-      objects,
-    };
+    const doc = joinDocument(
+      { type: "doc", content: [...hostFields, ...body] },
+      contents,
+      new Set([hostId]),
+    );
+    // 埋め込んだObjectやField行まで含めた文書全体から版を作る。
+    const revision = createHash("sha256")
+      .update(JSON.stringify(doc))
+      .digest("base64url");
+    return { doc, objects, revision };
   }
 
   /**
@@ -538,8 +542,21 @@ export class ObjectStore {
    * 置かれた場所からContextを継承して作る。この文書から消え、他のどこにも
    * 置かれていないObjectは削除する。
    */
-  savePage(hostId: string, doc: DocNode, now: number): ObjectPage {
+  savePage(
+    hostId: string,
+    doc: DocNode,
+    now: number,
+    baseRevision: string | null = null,
+  ): ObjectPage {
     this.database.transaction(() => {
+      if (
+        baseRevision !== null &&
+        this.loadPage(hostId).revision !== baseRevision
+      )
+        throw new ObjectStoreError(
+          "PAGE_CONFLICT",
+          `${PAGE_CONFLICT}: ${hostId} was changed elsewhere`,
+        );
       const host = this.row(hostId);
       this.hostBody(hostId); // 存在しないhostならここで失敗させる
       const split = splitDocument(doc);

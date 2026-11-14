@@ -16,20 +16,21 @@ const invoke = <T>(channel: string, ...args: readonly unknown[]): Promise<T> =>
 const api: DesktopApi = {
   loadPage: (hostId) =>
     invoke<ObjectPage>(DESKTOP_IPC_CHANNELS.objectLoadPage, hostId),
-  savePage: (hostId, doc, keepalive = false) => {
+  savePage: (hostId, doc, baseRevision, keepalive = false) => {
     if (!keepalive)
       return invoke<ObjectPage>(DESKTOP_IPC_CHANNELS.objectSavePage, hostId, {
         doc,
+        baseRevision,
       });
     // 閉じる途中の窓では非同期の返事を待てないため、同期で書き切る。
-    const error = ipcRenderer.sendSync(
+    const result = ipcRenderer.sendSync(
       DESKTOP_IPC_CHANNELS.objectSavePageSync,
       hostId,
-      { doc },
-    ) as string | null;
-    return error === null
-      ? Promise.resolve({ doc, objects: {} })
-      : Promise.reject(new Error(error));
+      { doc, baseRevision },
+    ) as { page: ObjectPage } | { error: string };
+    return "page" in result
+      ? Promise.resolve(result.page)
+      : Promise.reject(new Error(result.error));
   },
   searchObjects: (query, exclude = null) =>
     invoke<readonly ObjectSummary[]>(

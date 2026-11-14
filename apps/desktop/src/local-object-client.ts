@@ -7,8 +7,8 @@ export const localObjectClient = (store: ObjectStore): ObjectClient => {
   const run = <T>(work: () => T): Promise<T> => Promise.resolve().then(work);
   return {
     loadPage: (hostId) => run(() => store.loadPage(hostId)),
-    savePage: (hostId, doc) =>
-      run(() => store.savePage(hostId, doc, Date.now())),
+    savePage: (hostId, doc, baseRevision) =>
+      run(() => store.savePage(hostId, doc, Date.now(), baseRevision)),
     searchObjects: (query, exclude = null) =>
       run(() => store.search(query, exclude)),
     objectsOfType: (type) => run(() => store.objectsOfType(type)),

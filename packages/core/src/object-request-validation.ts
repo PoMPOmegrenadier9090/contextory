@@ -28,10 +28,16 @@ const requireType = (value: unknown): ObjectRecord["type"] => {
   return type;
 };
 
-export const parseObjectPageSave = (value: unknown): DocNode => {
-  const doc = requireRequestRecord(requireRequestRecord(value).doc);
+export const parseObjectPageSave = (
+  value: unknown,
+): { doc: DocNode; baseRevision: string | null } => {
+  const body = requireRequestRecord(value);
+  const doc = requireRequestRecord(body.doc);
   if (doc.type !== "doc") throw new TypeError("doc must be a document node");
-  return doc;
+  const base = body.baseRevision ?? null;
+  if (base !== null && typeof base !== "string")
+    throw new TypeError("baseRevision must be a string");
+  return { doc, baseRevision: base };
 };
 
 export const parseObjectCreate = (

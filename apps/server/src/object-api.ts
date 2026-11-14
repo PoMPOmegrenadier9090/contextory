@@ -35,13 +35,15 @@ export const registerObjectRoutes = (
   app.get("/api/next/pages/:hostId", (request) =>
     store.loadPage(param(request.params, "hostId")),
   );
-  app.put("/api/next/pages/:hostId", (request) =>
-    store.savePage(
+  app.put("/api/next/pages/:hostId", (request) => {
+    const { doc, baseRevision } = parseObjectPageSave(request.body);
+    return store.savePage(
       param(request.params, "hostId"),
-      parseObjectPageSave(request.body),
+      doc,
       Date.now(),
-    ),
-  );
+      baseRevision,
+    );
+  });
 
   app.get("/api/next/objects", (request) => {
     const query = requireRecord(request.query);
