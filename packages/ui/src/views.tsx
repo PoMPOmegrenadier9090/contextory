@@ -101,6 +101,10 @@ export const ViewTabs = ({
   const [selected, setSelected] = useState<string | null>(null);
   /** 絞り込みの窓で開いているField */
   const [filtering, setFiltering] = useState<string | null>(null);
+  /** 並べ替えの窓で、キーを選び直している段 */
+  const [sorting, setSorting] = useState<number | null>(null);
+  /** 階層で、配下を畳んでいる行 */
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   const [loaded, setLoaded] = useState<{
     readonly viewId: string;
     readonly data: ViewResult;
@@ -183,6 +187,7 @@ export const ViewTabs = ({
                     filters: [],
                     sort: "created",
                     desc: true,
+                    thenBy: [],
                     hidden: [],
                     nested: false,
                     nestTypes: [],
@@ -291,6 +296,12 @@ export const ViewTabs = ({
               </CheckItem>
               {view.nested ? (
                 <div className="od-filter-values">
+                  <p>
+                    行の下に出す種別。
+                    {scope === "object"
+                      ? "行に出す種別は「絞り込み」で選ぶ"
+                      : ""}
+                  </p>
                   {types.map((definition) => (
                     <CheckItem
                       key={definition.name}
@@ -343,32 +354,99 @@ export const ViewTabs = ({
       .filter((field) => field.kind !== "context")
       .map((field) => [field.id, field.name] as const),
   ];
+  const sortLabel = (by: string): string =>
+    sortKeys.find(([key]) => key === by)?.[1] ?? "作成日";
+  const levels = [{ by: view.sort, desc: view.desc }, ...view.thenBy];
+  const setLevels = (next: readonly { by: string; desc: boolean }[]): void =>
+    update({ sort: next[0]!.by, desc: next[0]!.desc, thenBy: next.slice(1) });
   const sort = (
     <Popover
-      label={`並べ替え: ${sortKeys.find(([key]) => key === view.sort)?.[1] ?? "作成日"} ${view.desc ? "↓" : "↑"}`}
+      label={`並べ替え: ${sortLabel(view.sort)} ${view.desc ? "↓" : "↑"}${view.thenBy.length ? ` ほか${view.thenBy.length}` : ""}`}
       ariaLabel="並べ替え"
+      active={view.thenBy.length > 0}
     >
       {() => (
         <div className="od-menu">
-          <Segmented
-            label="順序"
-            value={view.desc ? "desc" : "asc"}
-            options={[
-              ["asc", "昇順 ↑"],
-              ["desc", "降順 ↓"],
-            ]}
-            onChange={(order) => update({ desc: order === "desc" })}
-          />
-          {sortKeys.map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={view.sort === key}
-              onClick={() => update({ sort: key })}
-            >
-              {label}
-            </button>
+          {levels.map((level, i) => (
+            <div key={level.by} className="od-sort-level">
+              <div className="od-sort-row">
+                <small>{i === 0 ? "まず" : "次に"}</small>
+                <button
+                  type="button"
+                  aria-expanded={sorting === i}
+                  onClick={() => setSorting(sorting === i ? null : i)}
+                >
+                  {sortLabel(level.by)}
+                </button>
+                <button
+                  type="button"
+                  aria-label={level.desc ? "降順" : "昇順"}
+                  onClick={() =>
+                    setLevels(
+                      levels.map((other, j) =>
+                        j === i ? { ...other, desc: !other.desc } : other,
+                      ),
+                    )
+                  }
+                >
+                  {level.desc ? "降順 ↓" : "昇順 ↑"}
+                </button>
+                {levels.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label={`${sortLabel(level.by)}の並べ替えを外す`}
+                    onClick={() => {
+                      setSorting(null);
+                      setLevels(levels.filter((_, j) => j !== i));
+                    }}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+              {sorting === i ? (
+                <div className="od-chips">
+                  {sortKeys
+                    .filter(
+                      ([key]) =>
+                        key === level.by ||
+                        !levels.some((other) => other.by === key),
+                    )
+                    .map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-pressed={key === level.by}
+                        onClick={() => {
+                          setSorting(null);
+                          setLevels(
+                            levels.map((other, j) =>
+                              j === i ? { ...other, by: key } : other,
+                            ),
+                          );
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                </div>
+              ) : null}
+            </div>
           ))}
+          {sortKeys.some(([key]) => !levels.some((l) => l.by === key)) ? (
+            <button
+              type="button"
+              onClick={() => {
+                const by = sortKeys.find(
+                  ([key]) => !levels.some((l) => l.by === key),
+                )![0];
+                setLevels([...levels, { by, desc: false }]);
+                setSorting(levels.length);
+              }}
+            >
+              ＋ 並べ替えを足す
+            </button>
+          ) : null}
           {view.nested ? (
             <p>入れ子の行も、それぞれの親の下で同じ順に並べる</p>
           ) : null}
@@ -423,7 +501,7 @@ export const ViewTabs = ({
         <div className="od-menu">
           {scope === "object" ? (
             <>
-              <h3>種別</h3>
+              <h3>行に出す種別</h3>
               <div className="od-chips">
                 <button
                   type="button"
@@ -732,11 +810,40 @@ export const ViewTabs = ({
       />
     );
   };
-  const titleCell = (row: ViewRow): React.JSX.Element => {
+  /** 畳んだ行の配下を除いた行。parentは、下に入れ子の行があるか。 */
+  const rows: { row: ViewRow; parent: boolean }[] = [];
+  let hideBelow: number | null = null;
+  for (const [i, row] of (data?.rows ?? []).entries()) {
+    if (hideBelow !== null && row.depth > hideBelow) continue;
+    hideBelow = folded.has(row.object.id) ? row.depth : null;
+    rows.push({
+      row,
+      parent: (data?.rows[i + 1]?.depth ?? 0) > row.depth,
+    });
+  }
+  const titleCell = (row: ViewRow, parent: boolean): React.JSX.Element => {
     const { object } = row;
     const title = object.title === "無題" ? "" : object.title;
+    const closed = folded.has(object.id);
     return (
       <span className="od-cell-title">
+        {view.nested ? (
+          <button
+            type="button"
+            className="od-cell-fold"
+            aria-label={closed ? "配下を開く" : "配下を畳む"}
+            aria-expanded={!closed}
+            disabled={!parent}
+            onClick={() => {
+              const next = new Set(folded);
+              if (closed) next.delete(object.id);
+              else next.add(object.id);
+              setFolded(next);
+            }}
+          >
+            {parent ? (closed ? "▸" : "▾") : ""}
+          </button>
+        ) : null}
         {typeOf(object.type)?.checkbox ? (
           <input
             type="checkbox"
@@ -806,7 +913,13 @@ export const ViewTabs = ({
                             type="button"
                             onClick={() => {
                               close();
-                              update({ sort: field.id, desc: false });
+                              update({
+                                sort: field.id,
+                                desc: false,
+                                thenBy: view.thenBy.filter(
+                                  (level) => level.by !== field.id,
+                                ),
+                              });
                             }}
                           >
                             昇順で並べ替え ↑
@@ -815,7 +928,13 @@ export const ViewTabs = ({
                             type="button"
                             onClick={() => {
                               close();
-                              update({ sort: field.id, desc: true });
+                              update({
+                                sort: field.id,
+                                desc: true,
+                                thenBy: view.thenBy.filter(
+                                  (level) => level.by !== field.id,
+                                ),
+                              });
                             }}
                           >
                             降順で並べ替え ↓
@@ -886,13 +1005,13 @@ export const ViewTabs = ({
           </tr>
         </thead>
         <tbody>
-          {(data?.rows ?? []).map((row) => {
+          {rows.map(({ row, parent }) => {
             // 入れ子の行は種別が違うことがある。その種別に無いFieldは空にする。
             const own = fieldsOf(row.object.type);
             return (
               <tr key={row.object.id}>
                 <td style={{ paddingLeft: `${8 + row.depth * 20}px` }}>
-                  {titleCell(row)}
+                  {titleCell(row, parent)}
                 </td>
                 {columns.map((field) => (
                   <td key={field.id}>
@@ -905,45 +1024,65 @@ export const ViewTabs = ({
               </tr>
             );
           })}
-          {target ? (
+          {target || scope === "object" ? (
             <tr>
               <td colSpan={columns.length + 2}>
                 <input
                   className="od-cell-input od-table-new"
-                  aria-label={`#${typeLabel(target.name)}を追加`}
-                  placeholder={`＋ #${typeLabel(target.name)}を追加（Enter）`}
+                  aria-label={
+                    target ? `#${typeLabel(target.name)}を追加` : "Objectを追加"
+                  }
+                  placeholder={
+                    target
+                      ? `＋ #${typeLabel(target.name)}を追加（「#種別 Title」でほかの種別）`
+                      : "＋ 「#種別 Title」で追加"
+                  }
                   onKeyDown={(event) => {
                     const input = event.currentTarget;
-                    const title = input.value.trim();
+                    const typed = input.value.trim();
                     if (
                       event.key !== "Enter" ||
                       event.nativeEvent.isComposing ||
-                      !title
+                      !typed
                     )
                       return;
+                    // 「#Memo 考え」のように、先頭の#で種別を選べる。
+                    const [, word = "", rest = ""] =
+                      /^#(\S+)\s*(.*)$/.exec(typed) ?? [];
+                    const named = types.find((definition) =>
+                      [definition.name, typeLabel(definition.name)].some(
+                        (candidate) =>
+                          candidate.toLowerCase() === word.toLowerCase(),
+                      ),
+                    );
+                    const type = named ?? target;
+                    const title = named ? rest.trim() : typed;
+                    if (!type) return;
                     input.value = "";
                     // 一つの値で絞っている選択は、新しいObjectの初期値にする。
                     const initial = Object.fromEntries(
-                      view.filters
-                        .filter(
-                          (candidate) =>
-                            candidate.values.length === 1 &&
-                            fields.some(
-                              (field) =>
-                                field.id === candidate.fieldId &&
-                                field.kind === "select",
-                            ),
-                        )
-                        .map((candidate) => [
-                          candidate.fieldId,
-                          textNodes(candidate.values[0]!),
-                        ]),
+                      type.name !== target?.name
+                        ? []
+                        : view.filters
+                            .filter(
+                              (candidate) =>
+                                candidate.values.length === 1 &&
+                                fields.some(
+                                  (field) =>
+                                    field.id === candidate.fieldId &&
+                                    field.kind === "select",
+                                ),
+                            )
+                            .map((candidate) => [
+                              candidate.fieldId,
+                              textNodes(candidate.values[0]!),
+                            ]),
                     );
                     act(async () => {
                       const id = newId();
                       await client.createObject({
                         id,
-                        type: target.name,
+                        type: type.name,
                         title,
                         parentId: anchorId,
                       });

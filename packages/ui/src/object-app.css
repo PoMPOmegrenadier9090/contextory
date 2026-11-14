@@ -1028,6 +1028,33 @@ body,
   border-color: var(--od-accent);
 }
 
+/* 並べ替えの段。キー、順序、外すボタンを一行に並べる。 */
+.od-sort-level {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+
+.od-sort-row {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.od-sort-row small {
+  min-width: 30px;
+  padding-left: 6px;
+}
+
+.od-demo .od-pop-panel .od-sort-row button {
+  width: auto;
+}
+
+.od-demo .od-pop-panel .od-sort-row button:first-of-type {
+  flex: 1;
+  font-weight: 600;
+}
+
 .od-filter-values {
   display: grid;
   gap: 2px;
@@ -1161,6 +1188,21 @@ body,
 .od-demo .od-cell-input:focus {
   background: var(--od-surface);
   border-color: var(--od-accent);
+}
+
+.od-demo .od-cell-fold {
+  flex: none;
+  width: 18px;
+  padding: 0;
+  color: var(--od-muted);
+  font-size: 14px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.od-demo .od-cell-fold:disabled {
+  cursor: default;
 }
 
 .od-cell-title .od-cell-input {

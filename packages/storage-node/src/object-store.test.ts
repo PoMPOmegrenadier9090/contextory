@@ -510,6 +510,19 @@ describe("ObjectStore", () => {
       ["sub", 0],
       ["task", 0],
     ]);
+    // 同じ値の行は、二つ目の並べ替えで並べる。
+    expect(ids({ reach: "all", sort: "state" })).toEqual([
+      ["t2", 0],
+      ["task", 0],
+      ["sub", 0],
+    ]);
+    expect(
+      ids({ reach: "all", sort: "state", thenBy: [{ by: "due" }] }),
+    ).toEqual([
+      ["task", 0],
+      ["t2", 0],
+      ["sub", 0],
+    ]);
     // Contextも表から書き換えられる。循環になる相手は取り込まない。
     store.patchObject(
       "t2",

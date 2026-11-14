@@ -63,6 +63,13 @@ export interface ViewFilter {
   readonly values: readonly string[];
 }
 
+/** 二つ目からの並べ替え。前の順で同じ値の行を並べる。 */
+export interface ViewSort {
+  /** "created"、"updated"、"title"、またはFieldのID */
+  readonly by: string;
+  readonly desc: boolean;
+}
+
 /** 種別ごとに保存する、Objectの見せ方。 */
 export interface ViewDefinition {
   readonly id: string;
@@ -79,6 +86,8 @@ export interface ViewDefinition {
   /** "created"、"updated"、"title"、またはFieldのID */
   readonly sort: string;
   readonly desc: boolean;
+  /** 二つ目からの並べ替え */
+  readonly thenBy: readonly ViewSort[];
   /** 表で隠すFieldのID */
   readonly hidden: readonly string[];
   /** 表で、配下のObjectを行の下に入れ子で出す。 */

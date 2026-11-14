@@ -114,6 +114,14 @@ export const parseView = (value: unknown): ViewDefinition => {
     }),
     sort: typeof view.sort === "string" && view.sort ? view.sort : "created",
     desc: view.desc !== false,
+    thenBy: list(view.thenBy)
+      .flatMap((item) => {
+        const next = requireRequestRecord(item);
+        return typeof next.by === "string" && next.by
+          ? [{ by: next.by, desc: next.desc === true }]
+          : [];
+      })
+      .slice(0, 4),
     hidden: list(view.hidden).filter(
       (id): id is string => typeof id === "string",
     ),

@@ -893,14 +893,15 @@ export class ObjectStore {
            WHERE c.target_id = ?`,
         )
         .all(id) as ObjectRow[];
-    const key = ({ row, values }: Item): string | number =>
-      view.sort === "created"
+    const key = ({ row, values }: Item, by: string): string | number =>
+      by === "created"
         ? row.created_at
-        : view.sort === "updated"
+        : by === "updated"
           ? row.updated_at
-          : view.sort === "title"
+          : by === "title"
             ? this.text(nodes(row.title))
-            : this.text(values[view.sort] ?? []);
+            : this.text(values[by] ?? []);
+    const sorts = [{ by: view.sort, desc: view.desc }, ...view.thenBy];
     /** 入れ子に出す種別。nullならすべて。 */
     const nest = view.nestTypes.length
       ? new Set(view.nestTypes)
@@ -917,12 +918,15 @@ export class ObjectStore {
               passes(candidate),
         )
         .sort((a, b) => {
-          const [x, y] = [key(a), key(b)];
-          const order =
-            typeof x === "number"
-              ? x - (y as number)
-              : x.localeCompare(y as string, "ja");
-          return view.desc ? -order : order;
+          for (const { by, desc } of sorts) {
+            const [x, y] = [key(a, by), key(b, by)];
+            const order =
+              typeof x === "number"
+                ? x - (y as number)
+                : x.localeCompare(y as string, "ja");
+            if (order) return desc ? -order : order;
+          }
+          return 0;
         });
     const pool =
       anchor === null
