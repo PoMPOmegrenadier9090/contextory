@@ -284,6 +284,9 @@ importers:
       '@pkm/core':
         specifier: workspace:*
         version: link:../core
+      '@tiptap/extension-list':
+        specifier: 3.33.1
+        version: 3.33.1(@tiptap/core@3.33.1(@tiptap/pm@3.33.1))(@tiptap/pm@3.33.1)
       '@tiptap/extension-unique-id':
         specifier: 3.33.1
         version: 3.33.1(@tiptap/core@3.33.1(@tiptap/pm@3.33.1))(@tiptap/pm@3.33.1)

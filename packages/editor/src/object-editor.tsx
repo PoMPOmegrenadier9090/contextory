@@ -1,6 +1,11 @@
+import { ListItem } from "@tiptap/extension-list";
 import UniqueID from "@tiptap/extension-unique-id";
 import { GapCursor } from "@tiptap/pm/gapcursor";
-import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
+import {
+  Fragment,
+  type Node as PMNode,
+  type ResolvedPos,
+} from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
@@ -38,6 +43,8 @@ import {
   type ObjectType,
   type TypeDefinition,
 } from "@pkm/core";
+
+import { conversionAt } from "./object-conversion.js";
 
 /** エディタが表示に使うObjectの情報。 */
 export interface EditorObject {
@@ -382,26 +389,21 @@ const ObjectBlockView = ({
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
     >
-      {/* Tanaと同じく、行頭に開閉と「開く」を置いて、マウスの移動を減らす。 */}
+      {/* 行頭は種別のアイコンか、チェックボックス。幅はどの種別も同じにする。 */}
       <span className="pe-object-lead" contentEditable={false}>
+        {/* 開閉は左の余白に置き、行の幅を取らない。 */}
         <button
           type="button"
           className="pe-toggle"
           aria-expanded={!collapsed}
           aria-label={collapsed ? "展開" : "畳む"}
+          aria-keyshortcuts="Meta+ArrowDown Meta+ArrowUp"
           onClick={toggle}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="M6 4l4 4-4 4" />
           </svg>
         </button>
-        <button
-          type="button"
-          className="pe-bullet"
-          data-has-body={hasBody}
-          aria-label="開く"
-          onClick={() => host.open(id)}
-        />
         {checkbox ? (
           <input
             type="checkbox"
@@ -409,13 +411,35 @@ const ObjectBlockView = ({
             checked={Boolean(node.attrs.done)}
             onChange={() => updateAttributes({ done: !node.attrs.done })}
           />
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            className="pe-icon"
+            data-has-body={collapsed && hasBody}
+            aria-label={`${typeLabel(type)}を開く`}
+            title="開く"
+            onClick={() => host.open(id)}
+          />
+        )}
       </span>
       <NodeViewContent className="pe-object-content" />
       <span className="pe-object-side" contentEditable={false}>
         {collapsed ? values.slice(0, SIDE_VALUES) : null}
         {collapsed && values.length > SIDE_VALUES ? (
           <span className="pe-value">+{values.length - SIDE_VALUES}</span>
+        ) : null}
+        {checkbox ? (
+          <button
+            type="button"
+            className="pe-open"
+            aria-label={`${typeLabel(type)}を開く`}
+            title="開く"
+            onClick={() => host.open(id)}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M6 4h6v6M12 4l-7 7" />
+            </svg>
+          </button>
         ) : null}
       </span>
     </NodeViewWrapper>
@@ -441,7 +465,50 @@ const ObjectBlock = Node.create({
   ],
   addNodeView: () => ReactNodeViewRenderer(ObjectBlockView),
   addKeyboardShortcuts() {
+    /** カーソルを包むobjectBlockの深さ。内側から順に。 */
+    const objectDepths = ($from: ResolvedPos): number[] => {
+      const depths: number[] = [];
+      for (let depth = $from.depth; depth > 0; depth--)
+        if ($from.node(depth).type.name === "objectBlock") depths.push(depth);
+      return depths;
+    };
     return {
+      // Tanaと同じく、Cmd+↓で開き、Cmd+↑で畳む。Objectの外では既定の動きのまま。
+      "Mod-ArrowDown": ({ editor }) => {
+        const { $from } = editor.state.selection;
+        const [depth] = objectDepths($from);
+        if (depth === undefined) return false;
+        const object = $from.node(depth);
+        if (!object.attrs.collapsed) return true;
+        const at = $from.before(depth);
+        return editor.commands.command(({ tr, state }) => {
+          tr.setNodeAttribute(at, "collapsed", false);
+          // 中身が無ければ、開いた時に書ける行を足す。
+          if (object.childCount === 1)
+            tr.insert(
+              at + object.nodeSize - 1,
+              state.schema.nodes.paragraph!.create(),
+            );
+          return true;
+        });
+      },
+      "Mod-ArrowUp": ({ editor }) => {
+        const { $from } = editor.state.selection;
+        const depth = objectDepths($from).find(
+          (candidate) => !$from.node(candidate).attrs.collapsed,
+        );
+        if (depth === undefined) return objectDepths($from).length > 0;
+        const object = $from.node(depth);
+        const at = $from.before(depth);
+        return editor.commands.command(({ tr }) => {
+          tr.setNodeAttribute(at, "collapsed", true);
+          // 隠れる行にカーソルを残さず、Titleの末尾へ移す。
+          tr.setSelection(
+            TextSelection.create(tr.doc, at + object.firstChild!.nodeSize),
+          );
+          return true;
+        });
+      },
       Enter: ({ editor }) => {
         const { $from, empty } = editor.state.selection;
         const depth = $from.depth - 1;
@@ -455,14 +522,27 @@ const ObjectBlock = Node.create({
           $from.index(depth) === $from.node(depth).childCount - 1;
         if (!inTitle && !emptyLast) return false;
         // TitleでのEnter、または本文末尾の空行でのEnterで、Objectの外へ出る。
+        // リスト項目のObjectなら、次の項目を作る。
+        const inItem =
+          depth > 0 &&
+          $from.node(depth - 1).type.name === "listItem" &&
+          $from.index(depth - 1) === 0;
         return editor
           .chain()
           .command(({ tr, state }) => {
-            const after = $from.after(depth);
+            const { paragraph, listItem } = state.schema.nodes;
+            const after = inItem ? $from.after(depth - 1) : $from.after(depth);
             if (emptyLast) tr.delete($from.before(), $from.after());
             const pos = tr.mapping.map(after);
-            tr.insert(pos, state.schema.nodes.paragraph!.create());
-            tr.setSelection(TextSelection.create(tr.doc, pos + 1));
+            tr.insert(
+              pos,
+              inItem
+                ? listItem!.create(null, paragraph!.create())
+                : paragraph!.create(),
+            );
+            tr.setSelection(
+              TextSelection.create(tr.doc, pos + (inItem ? 2 : 1)),
+            );
             return true;
           })
           .scrollIntoView()
@@ -651,20 +731,74 @@ const atItems = async (
     : []),
 ];
 
+/** 複数の行を選んで#を打った時に、本文にする範囲を覚えておく。 */
+const selectionBody = new PluginKey<{ title: number; end: number } | null>(
+  "selectionBody",
+);
+
+const SelectionBody = Extension.create({
+  name: "selectionBody",
+  addProseMirrorPlugins: () => [
+    new Plugin<{ title: number; end: number } | null>({
+      key: selectionBody,
+      state: {
+        init: () => null,
+        apply(tr, value) {
+          const next = tr.getMeta(selectionBody) as
+            { title: number; end: number } | undefined;
+          if (next) return next;
+          if (!value) return null;
+          const title = tr.mapping.map(value.title);
+          const { $from } = tr.selection;
+          // 最初の行から離れたら、選んだ範囲は使わない。
+          if ($from.depth < 1 || $from.before() !== title) return null;
+          return { title, end: tr.mapping.map(value.end, -1) };
+        },
+      },
+      props: {
+        handleTextInput(view, from, to, text) {
+          if (text !== "#" || from === to) return false;
+          const { doc } = view.state;
+          const $from = doc.resolve(from);
+          const $to = doc.resolve(to);
+          const range = $from.blockRange($to);
+          if (
+            $from.sameParent($to) ||
+            !$from.parent.isTextblock ||
+            !range ||
+            range.depth !== $from.depth - 1
+          )
+            return false;
+          // 最初の行の末尾に#を打ち、残りの行はObjectの本文にする。
+          view.dispatch(
+            view.state.tr
+              .setSelection(TextSelection.create(doc, $from.end()))
+              .insertText("#")
+              .setMeta(selectionBody, {
+                title: $from.before(),
+                end: range.end,
+              }),
+          );
+          return true;
+        },
+      },
+    }),
+  ],
+});
+
 const convertBlock = (
   editor: Editor,
   range: Range,
   type: ObjectType,
   host: EditorHost,
 ): void => {
+  const pending = selectionBody.getState(editor.state);
   editor
     .chain()
     .focus()
     .deleteRange(range)
     .command(({ tr, state }) => {
       const $pos = tr.selection.$from;
-      const block = $pos.parent;
-      const depth = $pos.depth;
       const {
         objectBlock,
         objectTitle,
@@ -673,11 +807,13 @@ const convertBlock = (
         objectRef,
         paragraph,
       } = state.schema.nodes;
-      if (block.type !== paragraph || depth < 1) return false;
-      const index = $pos.index(depth - 1);
-      // リスト項目の先頭段落など、Objectを置けない場所では変換しない。
-      if (!$pos.node(depth - 1).canReplaceWith(index, index + 1, objectBlock!))
-        return false;
+      const target = conversionAt(
+        $pos,
+        pending && $pos.depth > 0 && pending.title === $pos.before()
+          ? tr.mapping.map(pending.end, -1)
+          : null,
+      );
+      if (!target) return false;
       // Fieldの行は作成時に並べる。Contextには置かれた場所から継ぐ値を入れる。
       const definition = typeOf(host, type);
       const fields = (
@@ -702,18 +838,33 @@ const convertBlock = (
                 : null,
             ),
       );
-      const object = objectBlock!.create({ objectId: newId(), type }, [
-        objectTitle!.create(null, block.content),
-        ...fields,
-      ]);
-      const start = $pos.before(depth);
-      tr.replaceWith(start, start + block.nodeSize, [
-        object,
-        paragraph.create(),
-      ]);
-      tr.setSelection(
-        TextSelection.create(tr.doc, start + object.nodeSize + 1),
+      // Titleが決まっていれば、すぐ本文を書けるように開く。空ならTitleに入る。
+      const titled = target.title.size > 0;
+      const body =
+        titled && !target.body.length
+          ? [paragraph!.create()]
+          : [...target.body];
+      const object = objectBlock!.create(
+        { objectId: newId(), type, collapsed: !titled && !body.length },
+        [objectTitle!.create(null, target.title), ...fields, ...body],
       );
+      const $receiver = tr.doc.resolve(target.from);
+      const at = $receiver.index();
+      if (
+        !$receiver.parent.canReplace(
+          at,
+          at + target.body.length + 1,
+          Fragment.from(object),
+        )
+      )
+        return false;
+      tr.replaceWith(target.from, target.to, object);
+      // 新しく足した空の本文の行へ、無ければTitleの末尾へ入る。
+      const cursor =
+        titled && !target.body.length
+          ? target.from + object.nodeSize - 2
+          : target.from + 1 + target.title.size + 1;
+      tr.setSelection(TextSelection.create(tr.doc, cursor));
       return true;
     })
     .run();
@@ -802,6 +953,8 @@ const createMenus = (
         Suggestion<MenuItem, MenuItem>({
           ...common,
           char: "#",
+          // Tanaと同じく、文に続けて打った#でも作れるようにする。
+          allowedPrefixes: null,
           pluginKey: new PluginKey("hashMenu"),
           items: ({ query }) => hashItems(host.current, query),
           render: render("このBlockをObjectにする"),
@@ -869,7 +1022,9 @@ export const ObjectEditor = ({
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ document: false }),
+      StarterKit.configure({ document: false, listItem: false }),
+      // リスト項目もObjectにできるよう、項目の先頭にObjectを置けるようにする。
+      ListItem.extend({ content: "(paragraph | objectBlock) block*" }),
       Document,
       UniqueID.configure({
         types: ["paragraph", "heading", "listItem", "objectBlock"],
@@ -881,6 +1036,7 @@ export const ObjectEditor = ({
       ObjectFieldControl,
       ObjectBlock,
       CollapsedGuard,
+      SelectionBody,
       createTags(hostRef),
       createMenus(bridge, hostRef),
     ],
