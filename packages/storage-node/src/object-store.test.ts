@@ -313,8 +313,8 @@ describe("ObjectStore", () => {
     expect(
       store
         .queryView(renamed.views[0]!.id, null, "2026-11-12")
-        .rows.map((row) => [row.object.id, row.values]),
-    ).toEqual([["mtg", { place: [text("3F")] }]]);
+        .rows.map((row) => [row.object.id, row.titleEditable, row.values]),
+    ).toEqual([["mtg", true, { place: [text("3F")] }]]);
     store.updateType("meeting", { fields: [] });
     expect(
       store.loadPage(DAILY).doc.content?.[0]?.content?.map((n) => n.type),
@@ -480,14 +480,31 @@ describe("ObjectStore", () => {
       ["sub", 0],
     ]);
     expect(
-      ids({ reach: "all", filters: [{ fieldId: "state", value: "進行中" }] }),
+      ids({
+        reach: "all",
+        filters: [{ fieldId: "state", values: ["進行中", "未着手"] }],
+      }),
     ).toEqual([["sub", 0]]);
     expect(
-      ids({ reach: "all", filters: [{ fieldId: "due", value: "past" }] }),
+      ids({ reach: "all", filters: [{ fieldId: "due", values: ["past"] }] }),
     ).toEqual([["sub", 0]]);
     expect(
-      ids({ reach: "all", filters: [{ fieldId: "due", value: "week" }] }),
+      ids({ reach: "all", filters: [{ fieldId: "due", values: ["week"] }] }),
     ).toEqual([["t2", 0]]);
+    expect(
+      ids({ reach: "all", filters: [{ fieldId: "due", presence: "unset" }] }),
+    ).toEqual([["task", 0]]);
+    // 入れ子に出す種別は選べる。別の種別には、Fieldの条件を掛けない。
+    expect(
+      ids({
+        nested: true,
+        nestTypes: ["memo"],
+        filters: [{ fieldId: "due", presence: "unset" }],
+      }),
+    ).toEqual([
+      ["task", 0],
+      ["note", 1],
+    ]);
     expect(ids({ reach: "all", sort: "due", desc: true })).toEqual([
       ["t2", 0],
       ["sub", 0],

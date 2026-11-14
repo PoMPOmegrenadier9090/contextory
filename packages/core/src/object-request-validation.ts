@@ -101,10 +101,15 @@ export const parseView = (value: unknown): ViewDefinition => {
     done: oneOf(view.done, ["all", "open", "done"]),
     filters: list(view.filters).flatMap((item) => {
       const filter = requireRequestRecord(item);
-      return typeof filter.fieldId === "string" &&
-        typeof filter.value === "string" &&
-        filter.value
-        ? [{ fieldId: filter.fieldId, value: filter.value }]
+      const values = list(filter.values).filter(
+        (value): value is string => typeof value === "string" && value !== "",
+      );
+      const presence =
+        filter.presence === "set" || filter.presence === "unset"
+          ? filter.presence
+          : null;
+      return typeof filter.fieldId === "string" && (presence || values.length)
+        ? [{ fieldId: filter.fieldId, presence, values }]
         : [];
     }),
     sort: typeof view.sort === "string" && view.sort ? view.sort : "created",
@@ -113,6 +118,9 @@ export const parseView = (value: unknown): ViewDefinition => {
       (id): id is string => typeof id === "string",
     ),
     nested: view.nested === true,
+    nestTypes: list(view.nestTypes).flatMap(
+      (type) => normalizeObjectType(type) ?? [],
+    ),
   };
 };
 

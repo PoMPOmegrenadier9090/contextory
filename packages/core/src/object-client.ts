@@ -26,6 +26,8 @@ export interface ObjectOverview {
 
 export interface ViewRow {
   readonly object: ObjectSummary;
+  /** Titleが文字だけか。参照が混ざるTitleは、表では書き換えない。 */
+  readonly titleEditable: boolean;
   /** FieldのIDごとの値。Contextは含まず、object.contextsで見る。 */
   readonly values: Readonly<Record<string, readonly DocNode[]>>;
   /** 階層で表示するときの深さ。最上位は0。 */

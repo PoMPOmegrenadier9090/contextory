@@ -826,21 +826,32 @@ export class ObjectStore {
       ),
     });
     // shortcut: 条件はSQLでなくここで見る。件数が増えて遅くなったらSQLへ移す。
-    const matches = ({ row, values }: Item): boolean =>
-      (type === null || row.type === type) &&
+    // Fieldの条件は、Viewが絞っている種別のObjectにだけ掛ける。入れ子に出す別の種別は、完了だけを見る。
+    const passes = ({ row, values }: Item): boolean =>
       (view.done === "all" || (row.done === 1) === (view.done === "done")) &&
-      view.filters.every((filter) => {
-        const kind = kinds.get(filter.fieldId);
-        const text = this.text(values[filter.fieldId] ?? []);
-        // 種別から外したFieldの条件は無視する。
-        if (kind === undefined) return true;
-        if (kind !== "date") return text === filter.value;
-        return filter.value === "today"
-          ? text === today
-          : filter.value === "week"
-            ? text >= today && text <= week
-            : text !== "" && text < today;
-      });
+      (row.type !== type ||
+        view.filters.every((filter) => {
+          const kind = kinds.get(filter.fieldId);
+          // 種別から外したFieldの条件は無視する。
+          if (kind === undefined) return true;
+          const text = this.text(values[filter.fieldId] ?? []);
+          if (filter.presence && (text !== "") !== (filter.presence === "set"))
+            return false;
+          return (
+            filter.values.length === 0 ||
+            filter.values.some((value) =>
+              kind !== "date"
+                ? text === value
+                : value === "today"
+                  ? text === today
+                  : value === "week"
+                    ? text >= today && text <= week
+                    : text !== "" && text < today,
+            )
+          );
+        }));
+    const matches = (item: Item): boolean =>
+      (type === null || item.row.type === type) && passes(item);
 
     if (view.layout === "timeline") {
       const narrowed =
@@ -890,10 +901,21 @@ export class ObjectStore {
           : view.sort === "title"
             ? this.text(nodes(row.title))
             : this.text(values[view.sort] ?? []);
-    const shown = (rows: readonly ObjectRow[]): Item[] =>
+    /** 入れ子に出す種別。nullならすべて。 */
+    const nest = view.nestTypes.length
+      ? new Set(view.nestTypes)
+      : type === null
+        ? null
+        : new Set([type]);
+    const shown = (rows: readonly ObjectRow[], top: boolean): Item[] =>
       rows
         .map(item)
-        .filter(matches)
+        .filter((candidate) =>
+          top
+            ? matches(candidate)
+            : (nest === null || nest.has(candidate.row.type)) &&
+              passes(candidate),
+        )
         .sort((a, b) => {
           const [x, y] = [key(a), key(b)];
           const order =
@@ -912,6 +934,7 @@ export class ObjectStore {
             // 階層では、同じ種別のObjectの配下にあるものを、その下に出す。
             (row) =>
               !view.nested ||
+              !nest?.has(row.type) ||
               !this.contextsOf(row.id).some(
                 (id) => this.row(id)?.type === type,
               ),
@@ -929,12 +952,17 @@ export class ObjectStore {
       for (const { row, values } of items) {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
-        rows.push({ object: this.summary(row), values, depth });
+        rows.push({
+          object: this.summary(row),
+          titleEditable: nodes(row.title).every((node) => node.type === "text"),
+          values,
+          depth,
+        });
         // 条件から外れたObjectの配下は辿らない。
-        if (view.nested) push(shown(direct(row.id)), depth + 1);
+        if (view.nested) push(shown(direct(row.id), false), depth + 1);
       }
     };
-    push(shown(pool), 0);
+    push(shown(pool, true), 0);
     const objects: Record<string, ObjectSummary> = {};
     for (const row of rows)
       for (const id of [
@@ -1098,12 +1126,20 @@ export class ObjectStore {
         ])
           this.database.prepare(sql).run(next, name);
         // ほかの種別のViewが、この種別で絞っていれば付け替える。
-        this.database
-          .prepare(
-            `UPDATE views SET config = json_set(config, '$.type', ?)
-             WHERE json_extract(config, '$.type') = ?`,
-          )
-          .run(next, name);
+        const rename = (type: string): string => (type === name ? next : type);
+        for (const { id, config } of this.database
+          .prepare("SELECT id, config FROM views")
+          .all() as { id: string; config: string }[]) {
+          const view = parseView(JSON.parse(config));
+          this.database.prepare("UPDATE views SET config = ? WHERE id = ?").run(
+            JSON.stringify({
+              ...view,
+              type: view.type && rename(view.type),
+              nestTypes: view.nestTypes.map(rename),
+            }),
+            id,
+          );
+        }
         current = next;
       }
     })();

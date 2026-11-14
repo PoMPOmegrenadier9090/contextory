@@ -54,10 +54,13 @@ export const TYPE_COLORS = [
   "gray",
 ] as const;
 
-/** Fieldの値での絞り込み。selectは選択肢、dateは"today"・"week"・"past"。 */
+/** Fieldの値での絞り込み。 */
 export interface ViewFilter {
   readonly fieldId: string;
-  readonly value: string;
+  /** 値があるか無いかで絞る。nullなら見ない。 */
+  readonly presence: "set" | "unset" | null;
+  /** どれかに合えば通す。selectは選択肢、dateは"today"・"week"・"past"。空なら見ない。 */
+  readonly values: readonly string[];
 }
 
 /** 種別ごとに保存する、Objectの見せ方。 */
@@ -80,6 +83,8 @@ export interface ViewDefinition {
   readonly hidden: readonly string[];
   /** 表で、配下のObjectを行の下に入れ子で出す。 */
   readonly nested: boolean;
+  /** 入れ子に出す種別。空なら、Viewが絞っている種別と同じ（絞っていなければすべて）。 */
+  readonly nestTypes: readonly ObjectType[];
 }
 
 export interface TypeDefinition {
