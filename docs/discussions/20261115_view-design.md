@@ -82,9 +82,29 @@ Objectごとに自由にViewを足す形（案B）も考えた。Projectごと�
 
 リスト（入れ子のSubtask）、Board、Calendar、文書へのViewの埋め込みは後回しにする。Dailyの「この日のMemo」も「その日に作ったMemo」というViewで表せるが、作ったばかりなので今回は触らず、Viewがそろってから載せ替えるかを決める。
 
+## 「配下」の取り方
+
+今の実装では、ProjectとTaskのつながりは置き場所（Placement）ではなくContextで持つ。
+
+- Projectの文書の中で`#`からTaskを作ると、そのTaskのContextに、最初の値としてProjectが入る（`savePage`と`createObject`）。Memoの中で作った場合は、Memo自身ではなく、MemoのContextを引き継ぐ（`inheritedContexts`）。
+- 作った後はContextと置き場所は別のものになる。ContextのFieldを書き換えれば、文書の中の位置は変わらずにつながる先だけが変わる。Dailyに置いたMemoのContextにProjectを入れれば、そのMemoはProjectにつながる。
+- Taskの中でSubtaskを作ると、SubtaskのContextはTaskになり、Projectにはならない。
+- 取り出すときは、Contextを逆向きに再帰でたどる（`REACH`）。Projectを指すObject、そのObjectを指すObject…と集める。今のTimelineはこの全部を出している。
+
+「配下」には次の二つがある。
+
+| 取り方       | Projectから見て含まれるもの                   |
+| ------------ | --------------------------------------------- |
+| 直接         | ContextがそのProjectのObject（Taskなど）      |
+| 配下のすべて | 直接のものに加え、Subtask、Taskの中のMemoなど |
+
+## 決めたこと（2026-11-15追記）
+
+- 種別を消したら、その種別のViewも消す。
+- 継承した種別は、継承元のViewを使えるようにする。どう見せるか（タブに混ぜるか、複製して使うか）は実装のときに決める。
+
 ## 決まっていないこと
 
-- Projectのページの表に、配下のさらに配下（ProjectのTaskのSubtaskなど）まで含めるか。今のTimelineは配下まで集めているので合わせるのが自然だが、Subtaskまで同じ表に平たく並ぶ。
+- Viewの条件の「配下」を、直接にするか、配下のすべてにするか。Viewごとに選べるようにし、表は直接、Timelineは配下のすべてを既定にする案がある。表で配下のすべてを取ると、ProjectのTaskとそのSubtaskが同じ表に平たく並ぶ。
 - Viewの条件を組み立てる画面の形。最初に扱う条件は上の範囲に絞る。
-- 保存したViewを、種別の名前を変えたり種別を消したりした時にどう扱うか。
-- 継承した種別が、継承元のViewを使えるようにするか。
+- 種別の名前を変えたときに、保存したViewをどう扱うか。
