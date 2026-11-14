@@ -1,61 +1,52 @@
 import { describe, expect, it } from "vitest";
 import type { DocNode } from "@pkm/core";
-import { captureDoc, captureMemo } from "./capture.js";
+import { captureMemo, emptyBody } from "./capture.js";
 
 const text = (value: string): DocNode => ({ type: "text", text: value });
 const paragraph = (...content: DocNode[]): DocNode => ({
   type: "paragraph",
   content,
 });
-/** 書き始めのMemoのTitleと本文を差し替える。 */
-const write = (title: DocNode[], ...body: DocNode[]): DocNode => {
-  const memo = captureDoc("project").content![0]!;
-  const [, field] = memo.content!;
-  return {
-    type: "doc",
-    content: [
-      {
-        ...memo,
-        content: [{ type: "objectTitle", content: title }, field!, ...body],
-      },
-    ],
-  };
-};
+const doc = (...content: DocNode[]): DocNode => ({ type: "doc", content });
 
 describe("Quick Capture", () => {
-  it("starts with an empty Memo carrying the Context", () => {
-    const doc = captureDoc("project");
-    expect(JSON.stringify(doc)).toContain('"objectId":"project"');
-    expect(captureMemo(doc)).toBeNull();
-    expect(captureMemo(captureDoc(null))).toBeNull();
+  it("does nothing until something is written", () => {
+    expect(
+      captureMemo({ title: " ", context: "project", body: emptyBody() }),
+    ).toBeNull();
   });
 
-  it("keeps the written Memo and drops empty paragraphs", () => {
+  it("builds a Memo with the Context and the written body", () => {
     const list: DocNode = {
       type: "bulletList",
       content: [{ type: "listItem", content: [paragraph(text("項目"))] }],
     };
-    const memo = captureMemo(write([text("考え")], paragraph(), list))!;
-    expect(memo.attrs?.collapsed).toBe(false);
+    const memo = captureMemo({
+      title: " 考え ",
+      context: "project",
+      body: doc(paragraph(), list),
+    })!;
+    expect(memo.attrs).toMatchObject({ type: "memo", collapsed: false });
     expect(memo.content?.map((node) => node.type)).toEqual([
       "objectTitle",
       "objectField",
       "bulletList",
     ]);
-    // Titleだけなら畳んで置く。
-    expect(
-      captureMemo(write([text("Titleだけ")], paragraph()))?.attrs,
-    ).toMatchObject({ collapsed: true });
+    expect(memo.content?.[0]?.content).toEqual([text("考え")]);
+    expect(JSON.stringify(memo.content?.[1])).toContain('"objectId":"project"');
   });
 
-  it("wraps text written after removing the Object", () => {
-    const memo = captureMemo({
-      type: "doc",
-      content: [paragraph(text("解除して書いた")), paragraph()],
+  it("folds a title-only Memo and keeps an untitled one", () => {
+    expect(
+      captureMemo({ title: "Titleだけ", context: null, body: emptyBody() })
+        ?.attrs,
+    ).toMatchObject({ collapsed: true });
+    const untitled = captureMemo({
+      title: "",
+      context: null,
+      body: doc(paragraph(text("本文だけ"))),
     })!;
-    expect(memo.type).toBe("objectBlock");
-    expect(memo.attrs?.type).toBe("memo");
-    expect(memo.content?.map((node) => node.type)).toEqual([
+    expect(untitled.content?.map((node) => node.type)).toEqual([
       "objectTitle",
       "paragraph",
     ]);

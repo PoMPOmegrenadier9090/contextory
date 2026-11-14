@@ -16,7 +16,7 @@ import {
 import { ObjectEditor, typeLabel, type EditorHost } from "@pkm/editor";
 import { useEffect, useRef, useState } from "react";
 
-import { captureDoc, captureMemo } from "./capture.js";
+import { captureMemo, emptyBody, type CaptureInput } from "./capture.js";
 import { DayMemoCard } from "./day-memo.js";
 import {
   dailyDate,
@@ -325,14 +325,14 @@ export const ObjectApp = ({
   const [creating, setCreating] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createType, setCreateType] = useState<ObjectType>("project");
-  /** Quick Captureの書き始めの文書。keyで作り直す。 */
-  const [capture, setCapture] = useState<{
-    readonly key: number;
-    readonly doc: DocNode;
-  } | null>(null);
-  /** Quick Captureで書いている最新の文書 */
-  const captured = useRef<DocNode | null>(null);
-  const [canCapture, setCanCapture] = useState(false);
+  /** Quick Captureの入力。本文のエディタはkeyで作り直す。 */
+  const [capture, setCapture] = useState<
+    (CaptureInput & { readonly key: number }) | null
+  >(null);
+  /** Quick Captureで書いている最新の本文。入力のたびに画面を描き直さない。 */
+  const capturedBody = useRef<DocNode>(emptyBody());
+  const [bodyWritten, setBodyWritten] = useState(false);
+  const captureBodyRef = useRef<HTMLDivElement>(null);
 
   // 書き込みは一本の列に並べ、作成→本文保存の順序を保つ。
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -540,15 +540,21 @@ export const ObjectApp = ({
     openType: (type) => openType(type),
   };
 
-  const showCapture = (doc: DocNode): void => {
-    captured.current = doc;
-    setCanCapture(captureMemo(doc) !== null);
-    setCapture({ key: ++loads.current, doc });
+  const showCapture = (input: CaptureInput): void => {
+    capturedBody.current = input.body;
+    setBodyWritten(
+      captureMemo({ ...input, title: "", context: null }) !== null,
+    );
+    setCapture({ ...input, key: ++loads.current });
   };
-  // Objectのページで開いたら、そのObjectをContextにして始める。行から消せる。
+  // Objectのページで開いたら、そのObjectをContextの候補にして始める。保存前に外せる。
   const startCapture = (): void => {
     if (!capture)
-      showCapture(captureDoc(current && !typePage ? current.id : null));
+      showCapture({
+        title: "",
+        context: current && !typePage ? current.id : null,
+        body: emptyBody(),
+      });
   };
   const shortcut = useRef(startCapture);
   shortcut.current = startCapture;
@@ -569,9 +575,10 @@ export const ObjectApp = ({
 
   /** 書いたMemoを、今日のDailyの末尾に足す。 */
   const saveCapture = (): void => {
-    const input = captured.current;
-    const memo = input && captureMemo(input);
-    if (!input || !memo) return;
+    if (!capture) return;
+    const input: CaptureInput = { ...capture, body: capturedBody.current };
+    const memo = captureMemo(input);
+    if (!memo) return;
     const daily = dailyHostId();
     flush();
     setCapture(null);
@@ -788,16 +795,60 @@ export const ObjectApp = ({
             }}
           >
             <h2 id="od-capture-title">Memoを今日のDailyに追加</h2>
-            <div className="od-document od-capture-editor">
+            <input
+              autoFocus
+              className="od-capture-title"
+              aria-label="MemoのTitle"
+              placeholder="Title"
+              value={capture.title}
+              onChange={(event) => {
+                const title = event.currentTarget.value;
+                setCapture((last) => last && { ...last, title });
+              }}
+              onKeyDown={(event) => {
+                // Enterか↓で本文へ移る。
+                if (
+                  (event.key === "Enter" || event.key === "ArrowDown") &&
+                  !event.nativeEvent.isComposing &&
+                  !event.metaKey &&
+                  !event.ctrlKey
+                ) {
+                  event.preventDefault();
+                  captureBodyRef.current
+                    ?.querySelector<HTMLElement>(".tiptap")
+                    ?.focus();
+                }
+              }}
+            />
+            {capture.context ? (
+              <p className="od-capture-context">
+                Context
+                <span>
+                  {objects[capture.context]?.title ?? "無題"}
+                  <button
+                    type="button"
+                    aria-label="Contextを外す"
+                    onClick={() =>
+                      setCapture((last) => last && { ...last, context: null })
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              </p>
+            ) : null}
+            <div className="od-capture-body" ref={captureBodyRef}>
               <ObjectEditor
                 key={capture.key}
-                initialDoc={capture.doc}
+                initialDoc={capture.body}
                 host={host}
-                ariaLabel="Quick Capture"
-                autofocus
+                ariaLabel="Memoの本文"
                 onChange={(doc) => {
-                  captured.current = doc;
-                  setCanCapture(captureMemo(doc) !== null);
+                  capturedBody.current = doc;
+                  setBodyWritten(
+                    captureMemo({ title: "", context: null, body: doc }) !==
+                      null,
+                  );
                 }}
               />
             </div>
@@ -805,7 +856,10 @@ export const ObjectApp = ({
               <button type="button" onClick={() => setCapture(null)}>
                 キャンセル
               </button>
-              <button type="submit" disabled={!canCapture}>
+              <button
+                type="submit"
+                disabled={!capture.title.trim() && !bodyWritten}
+              >
                 追加（⌘Enter）
               </button>
             </div>

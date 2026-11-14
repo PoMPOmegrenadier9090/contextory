@@ -801,12 +801,52 @@ body,
   min-height: 0;
 }
 
-.od-capture-editor {
-  max-height: 60vh;
-  overflow-y: auto;
-  padding-left: 10px;
+.od-capture .od-capture-title {
+  padding: 4px 0;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--od-ink);
+  background: none;
+  border: 0;
+  outline: none;
 }
 
-.od-capture-editor .pe-editor .tiptap {
-  min-height: 96px;
+.od-capture-context {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: -6px 0 0;
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
+.od-capture-context span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 4px 2px 8px;
+  color: var(--od-ink);
+  background: var(--od-subtle);
+  border: 1px solid var(--od-line);
+  border-radius: 999px;
+}
+
+.od-capture-context button {
+  padding: 0 4px;
+  color: var(--od-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.od-capture-body {
+  max-height: 55vh;
+  overflow-y: auto;
+  padding: 8px 0 0 14px;
+  border-top: 1px solid var(--od-line);
+}
+
+.od-capture-body .pe-editor .tiptap {
+  min-height: 120px;
 }
