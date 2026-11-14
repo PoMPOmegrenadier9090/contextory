@@ -804,8 +804,7 @@ body,
 .od-capture .od-capture-title {
   padding: 4px 0;
   font: inherit;
-  font-size: 17px;
-  font-weight: 650;
+  line-height: 1.7;
   color: var(--od-ink);
   background: none;
   border: 0;
@@ -843,7 +842,7 @@ body,
 .od-capture-body {
   max-height: 55vh;
   overflow-y: auto;
-  padding: 8px 0 0 14px;
+  padding: 8px 0 0;
   border-top: 1px solid var(--od-line);
 }
 

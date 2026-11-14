@@ -799,7 +799,7 @@ export const ObjectApp = ({
               autoFocus
               className="od-capture-title"
               aria-label="MemoのTitle"
-              placeholder="Title"
+              placeholder="ひとこと（空のままでもよい）"
               value={capture.title}
               onChange={(event) => {
                 const title = event.currentTarget.value;
