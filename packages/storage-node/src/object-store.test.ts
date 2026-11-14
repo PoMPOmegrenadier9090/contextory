@@ -166,6 +166,34 @@ describe("ObjectStore", () => {
     expect(store.getObject("t").title).toBe("上書き");
   });
 
+  it("lists the day's memos with the document that holds them", () => {
+    // Projectに置いたMemo、その中のMemo、Dailyに置いたMemo、どこにも置かないMemo
+    store.savePage(
+      "project",
+      doc(block("a", "memo", "A", block("inner", "memo", "中"))),
+      100,
+    );
+    store.savePage(DAILY, doc(block("d", "memo", "D")), 101);
+    store.createObject(
+      { id: "loose", type: "memo", title: "L", parentId: null },
+      102,
+    );
+    store.createObject(
+      { id: "t2", type: "task", title: "T", parentId: null },
+      103,
+    );
+
+    expect(
+      store
+        .overview(100, 200)
+        .memos.map((m) => [m.object.id, m.hostId, m.hostTitle]),
+    ).toEqual([
+      ["a", "project", "project"],
+      ["d", DAILY, "Daily"],
+      ["loose", null, ""],
+    ]);
+  });
+
   it("collects contexts and mentions transitively into the timeline", () => {
     const timeline = store
       .timeline("project")

@@ -8,9 +8,19 @@ import type {
   TypeDefinition,
 } from "./object-model.js";
 
+/** その日に作ったMemoと、それを置いている文書（埋め込みを遡った一番外側）。 */
+export interface DayMemo {
+  readonly object: ObjectSummary;
+  /** どの文書にも置いていなければnull */
+  readonly hostId: string | null;
+  readonly hostTitle: string;
+}
+
 export interface ObjectOverview {
   readonly navigation: readonly ObjectSummary[];
   readonly recent: readonly ObjectSummary[];
+  /** 作った順。同じ日の別のMemoの中にあるMemoは、その中で読めるので除く。 */
+  readonly memos: readonly DayMemo[];
 }
 
 export interface ObjectTypePatch {

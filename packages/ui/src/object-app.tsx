@@ -1,4 +1,6 @@
 import {
+  CONTEXT_FIELD,
+  fieldNode,
   inheritedContexts,
   isPageConflict,
   newId,
@@ -16,6 +18,7 @@ import {
 import { ObjectEditor, typeLabel, type EditorHost } from "@pkm/editor";
 import { useEffect, useRef, useState } from "react";
 
+import { DayMemoCard } from "./day-memo.js";
 import {
   dailyDate,
   dailyHostId,
@@ -307,6 +310,7 @@ export const ObjectApp = ({
   const [overview, setOverview] = useState<ObjectOverview>({
     navigation: [],
     recent: [],
+    memos: [],
   });
   const [types, setTypes] = useState<readonly TypeDefinition[]>([]);
   /** 開いている種別のページと、その種別のObject */
@@ -322,6 +326,11 @@ export const ObjectApp = ({
   const [creating, setCreating] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createType, setCreateType] = useState<ObjectType>("project");
+  /** Quick Captureの入力。contextは保存前に外せるContextの候補。 */
+  const [capture, setCapture] = useState<{
+    readonly text: string;
+    readonly context: string | null;
+  } | null>(null);
 
   // 書き込みは一本の列に並べ、作成→本文保存の順序を保つ。
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -529,6 +538,99 @@ export const ObjectApp = ({
     openType: (type) => openType(type),
   };
 
+  const startCapture = (): void =>
+    setCapture(
+      (last) =>
+        last ?? { text: "", context: current && !typePage ? current.id : null },
+    );
+  const shortcut = useRef(startCapture);
+  shortcut.current = startCapture;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "m"
+      ) {
+        event.preventDefault();
+        shortcut.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** 1行目をTitle、残りを本文にしたMemoを、今日のDailyの末尾に足す。 */
+  const saveCapture = (): void => {
+    if (!capture?.text.trim()) return;
+    const input = capture;
+    const [first = "", ...rest] = input.text.split("\n");
+    const memo: DocNode = {
+      type: "objectBlock",
+      attrs: {
+        id: newId(),
+        objectId: newId(),
+        type: "memo",
+        done: false,
+        // 本文があれば開いて置き、Dailyでそのまま読めるようにする。
+        collapsed: !rest.some((line) => line.trim()),
+      },
+      content: [
+        first.trim()
+          ? {
+              type: "objectTitle",
+              content: [{ type: "text", text: first.trim() }],
+            }
+          : { type: "objectTitle" },
+        ...(input.context
+          ? [
+              fieldNode({
+                ...CONTEXT_FIELD,
+                value: [
+                  { type: "objectRef", attrs: { objectId: input.context } },
+                ],
+              }),
+            ]
+          : []),
+        ...rest
+          .filter((line) => line.trim())
+          .map((line) => ({
+            type: "paragraph",
+            attrs: { id: newId() },
+            content: [{ type: "text", text: line }],
+          })),
+      ],
+    };
+    const daily = dailyHostId();
+    flush();
+    setCapture(null);
+    void enqueue(async () => {
+      // 他の端末と同時に書いた時は、読み直して足し直す。
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const latest = await client.loadPage(daily);
+          const result = await client.savePage(
+            daily,
+            { ...latest.doc, content: [...(latest.doc.content ?? []), memo] },
+            latest.revision,
+          );
+          merge(result.objects);
+          if (page === daily) {
+            revision.current = { hostId: daily, value: result.revision };
+            setLoaded({ key: ++loads.current, hostId: daily, doc: result.doc });
+          }
+          if (page !== null) await refreshSide(page);
+          return;
+        } catch (error) {
+          if (isPageConflict(error) && attempt < 2) continue;
+          // 書いた内容を失わないよう、入力欄に戻す。
+          setCapture(input);
+          throw error;
+        }
+      }
+    });
+  };
+
   const hasCheckbox = (type: ObjectType): boolean =>
     types.find((definition) => definition.name === type)?.checkbox ?? false;
   const colorOf = (type: ObjectType): string | undefined =>
@@ -594,6 +696,14 @@ export const ObjectApp = ({
         : entry.kind === "object" && entry.object.type === filter,
   );
 
+  // この日のDailyに置いたMemoは本文で読めるので、欄には出さない。
+  const dayMemos = overview.memos.filter((memo) => memo.hostId !== page);
+  const placeLabel = (hostId: string, hostTitle: string): string => {
+    const date = dailyDate(hostId);
+    return date
+      ? `${new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric" }).format(new Date(`${date}T12:00:00`))}のDaily`
+      : hostTitle;
+  };
   const areas = overview.navigation.filter((o) => o.type === "area");
   const projects = overview.navigation.filter((o) => o.type === "project");
   const selectedDate = page === null ? null : dailyDate(page);
@@ -655,6 +765,13 @@ export const ObjectApp = ({
         <div className="od-topbar-actions">
           <button
             type="button"
+            title="Quick Capture（⌘⇧M）"
+            onClick={startCapture}
+          >
+            ＋ Memo
+          </button>
+          <button
+            type="button"
             onClick={() => {
               setCreateType(
                 types.some((definition) => definition.name === "project")
@@ -668,6 +785,69 @@ export const ObjectApp = ({
           </button>
         </div>
       </header>
+      {capture ? (
+        <div className="od-dialog-backdrop">
+          <form
+            className="od-create-dialog od-capture"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="od-capture-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setCapture(null);
+              if (
+                event.key === "Enter" &&
+                (event.metaKey || event.ctrlKey) &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                saveCapture();
+              }
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveCapture();
+            }}
+          >
+            <h2 id="od-capture-title">Memoを今日のDailyに追加</h2>
+            <textarea
+              autoFocus
+              aria-label="Memo"
+              placeholder="1行目がTitle、2行目からが本文"
+              rows={5}
+              value={capture.text}
+              onChange={(event) => {
+                const text = event.currentTarget.value;
+                setCapture((last) => last && { ...last, text });
+              }}
+            />
+            {capture.context ? (
+              <p className="od-capture-context">
+                Context
+                <span>
+                  {objects[capture.context]?.title ?? "無題"}
+                  <button
+                    type="button"
+                    aria-label="Contextを外す"
+                    onClick={() =>
+                      setCapture((last) => last && { ...last, context: null })
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              </p>
+            ) : null}
+            <div className="od-dialog-actions">
+              <button type="button" onClick={() => setCapture(null)}>
+                キャンセル
+              </button>
+              <button type="submit" disabled={!capture.text.trim()}>
+                追加（⌘Enter）
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       {creating ? (
         <div className="od-dialog-backdrop">
           <form
@@ -962,23 +1142,41 @@ export const ObjectApp = ({
                 <section className="od-panel">
                   <header>
                     <div>
-                      <h2>この日の記録</h2>
-                      <p>この日に作成したObject。本文は元の場所に保存する</p>
+                      <h2>この日のMemo</h2>
+                      <p>
+                        ほかの文書でこの日に作ったMemo。ここで書いた内容は、置いてある文書にも出る
+                      </p>
                     </div>
                   </header>
-                  {overview.recent.length ? (
-                    <ul className="od-rows">
-                      {overview.recent.map((object) =>
-                        objectRow(
-                          object,
-                          object.contexts.length
-                            ? object.contexts
-                                .map((id) => objects[id]?.title ?? "")
-                                .join("、")
-                            : "Contextなし",
-                        ),
-                      )}
-                    </ul>
+                  {dayMemos.length ? (
+                    <div className="od-day-memos">
+                      {dayMemos.map((memo) => (
+                        <DayMemoCard
+                          key={memo.object.id}
+                          client={client}
+                          memo={memo}
+                          host={host}
+                          place={
+                            memo.hostId === null
+                              ? null
+                              : {
+                                  label: placeLabel(
+                                    memo.hostId,
+                                    memo.hostTitle,
+                                  ),
+                                  open: () => open(memo.hostId!),
+                                }
+                          }
+                          onTitle={(value) =>
+                            mutate(() =>
+                              client.patchObject(memo.object.id, {
+                                title: value,
+                              }),
+                            )
+                          }
+                        />
+                      ))}
+                    </div>
                   ) : (
                     <p className="od-empty">まだありません。</p>
                   )}

@@ -9,7 +9,7 @@ Quick Captureを作り直す前に、Memoをどこに置き、ほかのObjectと
 - ProjectなどとはContextでつなぎ、そのTimelineに出す。Memoを動かさない。
 - Dailyに「この日のMemo」の欄を足し、その日に作ったMemoを、どこに置いたものでも読んで編集できるようにする。
 
-実装はまだ始めていない。細かい点も最後の節のとおり決めた。
+細かい点は「決めたこと」の節のとおり決めた。同じ日に実装した内容は最後の節に書いた。
 
 ## 地の文を集めず、Memoに書くよう誘導する
 
@@ -73,3 +73,18 @@ DailyのMemoを、後からProjectの本文に載せたくなる場面はある�
 1. 「この日のMemo」には、その日に作ったMemoだけを出す。その日に編集した古いMemoは出さない。
 2. 欄に出すのはMemoだけにする。TaskなどほかのObjectは出さない。
 3. 今の行をMemoにする操作は、引き続き`#`にする。専用のショートカットや入力ルールは作らない。
+
+## 実装
+
+- `ObjectStore.overview`が、その日に作ったMemoと、置いてある文書（埋め込みを外側へ遡った文書）を返す。同じ日の別のMemoの中にあるMemoは、外側のMemoの中で読めるので除く。
+- Dailyの「この日の記録」の欄を、「この日のMemo」に置き換えた。開いているDailyに置いたMemoは出さない。各Memoは、Memoのページとして読み込み、保存する。保存の列、送り直し、競合の知らせはMemoごとに持つ。
+- Quick Captureは、画面右上の「＋ Memo」か⌘⇧M（WindowsではCtrl+Shift+M）で開く。1行目がTitle、2行目以降が本文になる。今日のDailyを読み直して末尾にMemoを足し、版を付けて保存する。他の端末と同時に書いて断られたら、2回まで読み直して足し直す。それでも保存できなければ、書いた内容を入力欄に戻す。
+- Object（Dailyを除く）のページで開くと、そのObjectをContextに付けた状態で始まり、保存前に外せる。
+
+確かめたこと：
+
+- ObjectStoreのテスト：Projectに置いたMemo、その中のMemo、Dailyに置いたMemo、どこにも置かないMemoの出し分け。
+- ブラウザー：DailyのMemoの欄で書いた内容がProjectのページに保存されること。ProjectのページからのQuick CaptureでContextが付き、ProjectのTimelineと今日のDailyに出ること。Dailyで入力した直後にQuick Captureしても、その入力が残ること。
+- Electronのsmoke。テスト用の偽サーバーの応答に`memos`を足した。
+
+古いサーバーは`memos`を返さないので、新しい画面から古いサーバーにつなぐとDailyが表示できない。サーバーと画面は同じ版にそろえて更新する。Macのどこからでも呼べるショートカット（Electronのglobal shortcut）は作っていない。

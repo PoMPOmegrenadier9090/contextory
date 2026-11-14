@@ -726,3 +726,116 @@ body,
   flex: 1;
   min-width: 0;
 }
+
+/* Quick Capture */
+.od-capture {
+  width: min(520px, 100%);
+}
+
+.od-capture textarea {
+  padding: 10px;
+  font: inherit;
+  line-height: 1.6;
+  color: var(--od-ink);
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 7px;
+  resize: vertical;
+}
+
+.od-capture-context {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
+.od-capture-context span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 4px 2px 8px;
+  color: var(--od-ink);
+  background: var(--od-subtle);
+  border: 1px solid var(--od-line);
+  border-radius: 999px;
+}
+
+.od-capture-context button {
+  padding: 0 4px;
+  color: var(--od-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* Dailyの「この日のMemo」 */
+.od-day-memos {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.od-day-memo {
+  padding: 10px 14px 4px;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line);
+  border-left: 3px solid var(--od-memo);
+  border-radius: 8px;
+}
+
+.od-day-memo > header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.od-day-memo .od-type {
+  color: var(--od-memo);
+  background: var(--od-memo-soft);
+  border: 0;
+  cursor: pointer;
+}
+
+.od-day-memo-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-weight: 650;
+  color: var(--od-ink);
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.od-day-memo-place {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  padding: 0;
+  color: var(--od-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.od-day-memo-place:hover {
+  color: var(--od-ink);
+  text-decoration: underline;
+}
+
+.od-day-memo-error {
+  margin: 6px 0 0;
+  color: var(--od-decision);
+  font-size: 12px;
+}
+
+.od-day-memo .pe-editor .tiptap {
+  min-height: 0;
+}

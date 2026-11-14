@@ -14,6 +14,8 @@ Contextoryは、自由に書いた文書の中で、まとまりをObjectとし�
 - `#`に知らない名前を入れると、新しい種別を作る
 - 種別ごとにFieldを定義する。Contextはどの種別にもある特別なFieldで、そのObjectがどこに属するかを表す
 - `@`で他のObjectに言及すると、参照先のTimelineにその記述が出る
+- Quick Capture（⌘⇧M）でMemoを今日のDailyに足す。開いているProjectなどをContextに付けられる
+- Dailyの「この日のMemo」で、ほかの文書でその日に作ったMemoを読み、そのまま編集する
 
 ## Macで始める
 
@@ -60,7 +62,7 @@ Apple Developer IDによる署名・公証は行っていません。
 
 ## 開発状況
 
-自由文書とObjectの編集、種別とFieldの定義、Timeline、DailyをWebとMacアプリで使えます。旧版のMarkdown Vault、Quick Capture、Syncthing同期、MCP接続は外しました。Quick CaptureとMCPは、新しい保存形式の上に作り直す予定です。
+自由文書とObjectの編集、種別とFieldの定義、Timeline、Daily、Quick CaptureをWebとMacアプリで使えます。旧版のMarkdown Vault、Syncthing同期、MCP接続は外しました。MCPは、新しい保存形式の上に作り直す予定です。Quick Captureは画面の中のショートカットだけで、Macのどこからでも呼べるショートカットはまだありません。
 
 - [開発・運用ガイド](docs/development.md)
 - [コード構成](docs/architecture.md)

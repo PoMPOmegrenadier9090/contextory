@@ -57,7 +57,7 @@ if (typeof electron === "string") {
           },
         );
       if (url.startsWith("/api/next/overview"))
-        return send(200, { navigation: [], recent: [] });
+        return send(200, { navigation: [], recent: [], memos: [] });
       return send(200, []);
     });
   });

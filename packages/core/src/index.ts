@@ -38,6 +38,7 @@ export type {
 } from "./object-model.js";
 export type {
   ObjectClient,
+  DayMemo,
   ObjectOverview,
   ObjectTypePatch,
 } from "./object-client.js";

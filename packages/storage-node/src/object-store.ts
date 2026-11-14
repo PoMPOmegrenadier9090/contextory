@@ -18,10 +18,12 @@ import {
   splitDocument,
   timeFromId,
   TYPE_COLORS,
+  type DayMemo,
   type DocNode,
   type FieldDefinition,
   type ObjectContent,
   type ObjectFieldContent,
+  type ObjectOverview,
   type ObjectPage,
   type ObjectRecord,
   type ObjectSummary,
@@ -883,27 +885,53 @@ export class ObjectStore {
     return this.types().find((type) => type.name === current)!;
   }
 
-  /** 画面の入口に出すObjectと、指定期間に作成したObject。 */
-  overview(
-    from: number,
-    to = Number.MAX_SAFE_INTEGER,
-  ): {
-    readonly navigation: ObjectSummary[];
-    readonly recent: ObjectSummary[];
-  } {
+  /** 画面の入口に出すObjectと、指定期間に作成したObjectとMemo。 */
+  overview(from: number, to = Number.MAX_SAFE_INTEGER): ObjectOverview {
     const select = (where: string, ...params: unknown[]): ObjectSummary[] =>
       (
         this.database
           .prepare(`SELECT * FROM objects WHERE ${where}`)
           .all(...params) as ObjectRow[]
       ).map((row) => this.summary(row));
+    const recent = select(
+      "created_at >= ? AND created_at < ? ORDER BY created_at DESC",
+      from,
+      to,
+    );
+    const memoIds = new Set(
+      recent.filter((o) => o.type === "memo").map((o) => o.id),
+    );
+    const hostOf = this.database
+      .prepare("SELECT host_id FROM placements WHERE object_id = ? LIMIT 1")
+      .pluck();
+    const memos: DayMemo[] = [];
+    for (const object of [...recent].reverse()) {
+      if (!memoIds.has(object.id)) continue;
+      // 埋め込みを外側へ遡る。同じ日のMemoに入っていれば、そちらで読める。
+      let hostId: string | null = null;
+      let nested = false;
+      const seen = new Set([object.id]);
+      for (
+        let id = hostOf.get(object.id) as string | undefined;
+        id !== undefined && !seen.has(id);
+        id = hostOf.get(id) as string | undefined
+      ) {
+        if (memoIds.has(id)) nested = true;
+        seen.add(id);
+        hostId = id;
+      }
+      if (nested) continue;
+      const host = hostId === null ? undefined : this.row(hostId);
+      memos.push({
+        object,
+        hostId,
+        hostTitle: host ? this.summary(host).title : hostId ? "Daily" : "",
+      });
+    }
     return {
       navigation: select("type IN ('area', 'project') ORDER BY created_at"),
-      recent: select(
-        "created_at >= ? AND created_at < ? ORDER BY created_at DESC",
-        from,
-        to,
-      ),
+      recent,
+      memos,
     };
   }
 
