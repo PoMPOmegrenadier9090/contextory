@@ -131,7 +131,7 @@
 /* Object行の先頭に操作をまとめる。 */
 .pe-object {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 6px;
 }
@@ -147,17 +147,16 @@
 
 .pe-object-lead {
   display: flex;
-  gap: 2px;
   align-items: center;
   height: 31px;
-  margin-inline-end: 8px;
+  margin-inline: -10px 4px;
   user-select: none;
 }
 
 .pe-object-lead input {
   width: 16px;
   height: 16px;
-  margin: 0 0 0 4px;
+  margin: 0;
   accent-color: var(--pe-type);
 }
 

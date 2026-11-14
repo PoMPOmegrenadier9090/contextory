@@ -97,22 +97,29 @@ export async function runObjectEditorBrowserChecks(parent: HTMLElement) {
   )!;
   const title = task.querySelector<HTMLElement>("[data-object-title]")!;
   const paragraph = editor.querySelector<HTMLElement>(":scope > p")!;
+  const rowLeft = task.getBoundingClientRect().left;
   const titleLeft = title.getBoundingClientRect().left;
   const toggle = task.querySelector<HTMLButtonElement>(".pe-toggle")!;
   const detail = task.querySelector<HTMLButtonElement>(".pe-object-open")!;
+  const checkbox = task.querySelector<HTMLInputElement>(
+    "input[type=checkbox]",
+  )!;
   const tag = task.querySelector<HTMLButtonElement>(".pe-tag")!;
   assert(
-    paragraph.getBoundingClientRect().left ===
-      task.getBoundingClientRect().left,
+    paragraph.getBoundingClientRect().left === rowLeft,
     "Normal paragraphs must start at the Object row's edge",
   );
   assert(
-    toggle.getBoundingClientRect().left === task.getBoundingClientRect().left,
-    "Toggle must start inside the Object row",
+    titleLeft - rowLeft === 42,
+    "Titles must keep the former checkbox-free indentation",
   );
   assert(
-    detail.getBoundingClientRect().right < titleLeft,
-    "Detail must be before the title",
+    toggle.getBoundingClientRect().right <=
+      detail.getBoundingClientRect().left &&
+      detail.getBoundingClientRect().right <=
+        checkbox.getBoundingClientRect().left &&
+      checkbox.getBoundingClientRect().right < titleLeft,
+    "Leading controls must not overlap each other or the title",
   );
   assert(
     Array.from(editor.querySelectorAll("[data-object-title]")).every(
