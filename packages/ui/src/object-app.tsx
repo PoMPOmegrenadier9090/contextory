@@ -289,6 +289,20 @@ const TypePage = ({
 const SAVE_DELAY = 400;
 const RETRY_DELAY = 3000;
 
+/** カーソルが本文の1行目にあるか。空の行では文字の位置が無いので、行の要素で測る。 */
+const caretOnFirstLine = (root: Element, caret: Range): boolean => {
+  const first = root.firstElementChild?.getBoundingClientRect();
+  const rect =
+    caret.getClientRects()[0] ??
+    (caret.startContainer instanceof Element
+      ? caret.startContainer
+      : caret.startContainer.parentElement
+    )?.getBoundingClientRect();
+  if (!first || !rect) return true;
+  const line = parseFloat(getComputedStyle(root).lineHeight) || 24;
+  return rect.top < first.top + line;
+};
+
 export const ObjectApp = ({
   client,
   location = "サーバーのSQLiteへ保存",
@@ -806,9 +820,16 @@ export const ObjectApp = ({
                 setCapture((last) => last && { ...last, title });
               }}
               onKeyDown={(event) => {
-                // Enterか↓で本文へ移る。
+                // Enterか↓、末尾での→で本文へ移る。
+                const input = event.currentTarget;
+                const atEnd =
+                  input.selectionStart === input.value.length &&
+                  input.selectionEnd === input.value.length;
                 if (
-                  (event.key === "Enter" || event.key === "ArrowDown") &&
+                  (event.key === "Enter" ||
+                    event.key === "ArrowDown" ||
+                    (event.key === "ArrowRight" && atEnd)) &&
+                  !event.shiftKey &&
                   !event.nativeEvent.isComposing &&
                   !event.metaKey &&
                   !event.ctrlKey
@@ -837,7 +858,45 @@ export const ObjectApp = ({
                 </span>
               </p>
             ) : null}
-            <div className="od-capture-body" ref={captureBodyRef}>
+            <div
+              className="od-capture-body"
+              ref={captureBodyRef}
+              // 本文の先頭で←、1行目で↑を押すと、ひとことの欄へ戻る。
+              onKeyDownCapture={(event) => {
+                if (
+                  (event.key !== "ArrowLeft" && event.key !== "ArrowUp") ||
+                  event.shiftKey ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.altKey ||
+                  event.nativeEvent.isComposing ||
+                  document.querySelector(".pe-menu")
+                )
+                  return;
+                const root = event.currentTarget.querySelector(".tiptap");
+                const selection = window.getSelection();
+                if (!root || !selection?.rangeCount || !selection.isCollapsed)
+                  return;
+                const caret = selection.getRangeAt(0);
+                const before = document.createRange();
+                before.setStart(root, 0);
+                before.setEnd(caret.startContainer, caret.startOffset);
+                const back =
+                  event.key === "ArrowLeft"
+                    ? before.toString() === ""
+                    : caretOnFirstLine(root, caret);
+                if (!back) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const title =
+                  document.querySelector<HTMLInputElement>(".od-capture-title");
+                title?.focus();
+                title?.setSelectionRange(
+                  title.value.length,
+                  title.value.length,
+                );
+              }}
+            >
               <ObjectEditor
                 key={capture.key}
                 initialDoc={capture.body}
