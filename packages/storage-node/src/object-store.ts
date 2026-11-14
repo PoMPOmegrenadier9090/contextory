@@ -284,7 +284,7 @@ export class ObjectStore {
         done: done ? 1 : 0,
         now,
       });
-    this.ensureType(type, now);
+    if (type !== "") this.ensureType(type, now);
     // shortcut: 検索用のTitleは書き込み時点のもの。参照先のTitle変更には追従しない。
     this.database
       .prepare("UPDATE objects SET title_text = ? WHERE id = ?")
@@ -552,20 +552,28 @@ export class ObjectStore {
         const parentId = split.parents[id] ?? (host ? hostId : null);
         // 親も今回初めて現れた場合に備え、親から先に作る。
         if (parentId !== null && parentId !== hostId) ensure(parentId);
-        const isNew = !this.row(id);
+        const existing = this.row(id);
+        const type =
+          content.attrs.type === ""
+            ? ""
+            : (normalizeObjectType(content.attrs.type) ?? "task");
         this.upsertObject(
           id,
-          normalizeObjectType(content.attrs.type) ?? "task",
+          type,
           content.title,
           content.body,
           Boolean(content.attrs.done),
           now,
         );
+        if (existing?.type && type === "")
+          this.database
+            .prepare("DELETE FROM field_values WHERE object_id = ?")
+            .run(id);
         // 文書木がContextの行を持つなら、後でその内容を正とする。
         const explicit = content.fields?.some(
           (field) => field.id === CONTEXT_FIELD.id,
         );
-        if (isNew && parentId !== null && !explicit) {
+        if (!existing && parentId !== null && !explicit) {
           const parent = this.row(parentId);
           this.setContexts(
             id,

@@ -15,6 +15,7 @@ import {
   NodeViewWrapper,
   ReactNodeViewRenderer,
   useEditor,
+  useEditorState,
   type Editor,
   type JSONContent,
   type NodeViewProps,
@@ -29,6 +30,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
   type MouseEvent,
@@ -70,6 +72,7 @@ export interface EditorHost {
 }
 
 const TYPE_LABEL: Record<string, string> = {
+  "": "タグなし",
   area: "Area",
   project: "Project",
   task: "Task",
@@ -176,36 +179,152 @@ const ObjectTitleView = ({
   node,
 }: NodeViewProps): React.JSX.Element => {
   const host = useHost();
-  const pos = getPos();
-  const type =
-    pos === undefined
-      ? null
-      : (editor.state.doc.resolve(pos).parent.attrs.type as ObjectType);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsId = useId();
+  const tag = useRef<HTMLButtonElement>(null);
+  const type = useEditorState({
+    editor,
+    selector: ({ editor: current }) => {
+      const pos = getPos();
+      return pos === undefined || pos > current.state.doc.content.size
+        ? null
+        : (current.state.doc.resolve(pos).parent.attrs.type as
+            ObjectType | undefined);
+    },
+  });
+  const focusTitleEnd = (): void => {
+    const start = getPos();
+    if (start === undefined) return;
+    editor.commands.setTextSelection(start + node.nodeSize - 1);
+    editor.view.focus();
+  };
+  const removeTag = (): void => {
+    const start = getPos();
+    if (start === undefined) return;
+    editor.commands.command(({ tr, state }) => {
+      const $title = tr.doc.resolve(start);
+      const object = $title.parent;
+      const objectPos = $title.before();
+      const afterTitle = start + node.nodeSize;
+      const contexts: PMNode[] = [];
+      const values: PMNode[] = [];
+      let end = afterTitle;
+      for (let i = 1; i < object.childCount; i++) {
+        const field = object.child(i);
+        if (!isField(field)) break;
+        end += field.nodeSize;
+        if (field.attrs.fieldId === CONTEXT_FIELD.id) contexts.push(field);
+        else if (field.content.size || field.attrs.value) {
+          const paragraph = state.schema.nodes.paragraph!;
+          const label = state.schema.text(`${String(field.attrs.name)}: `);
+          const value = field.content.size
+            ? field.content
+            : Fragment.from(state.schema.text(String(field.attrs.value)));
+          values.push(
+            paragraph.create(null, Fragment.from(label).append(value)),
+          );
+        }
+      }
+      tr.setNodeAttribute(objectPos, "type", "");
+      if (values.length) tr.setNodeAttribute(objectPos, "collapsed", false);
+      // 種別固有の入力済みFieldは、解除しても本文に残す。
+      tr.replaceWith(afterTitle, end, [...contexts, ...values]);
+      tr.setSelection(TextSelection.create(tr.doc, afterTitle - 1));
+      return true;
+    });
+    setActionsOpen(false);
+    editor.view.focus();
+  };
   return (
-    <NodeViewWrapper
-      className="pe-object-title"
-      onMouseDown={(event: MouseEvent<HTMLDivElement>) => {
-        if (event.button !== 0 || event.target !== event.currentTarget) return;
-        const start = getPos();
-        if (start === undefined) return;
-        // タグの脇にある余白をクリックしたときは、タイトルの末尾へ戻す。
-        event.preventDefault();
-        editor.commands.setTextSelection(start + node.nodeSize - 1);
-        editor.view.focus();
-      }}
-    >
-      <NodeViewContent<"span"> as="span" data-object-title="" />
-      {type ? (
-        <span contentEditable={false}>
+    <NodeViewWrapper>
+      <div
+        className="pe-object-title"
+        onMouseDown={(event: MouseEvent<HTMLDivElement>) => {
+          if (event.button !== 0 || event.target !== event.currentTarget)
+            return;
+          // タグの脇の余白をクリックしたときは、タイトルの末尾へ戻す。
+          event.preventDefault();
+          focusTitleEnd();
+        }}
+      >
+        <NodeViewContent<"span"> as="span" data-object-title="" />
+        {type ? (
           <button
             type="button"
             className="pe-tag"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => host.openType(type)}
+            contentEditable={false}
+            ref={tag}
+            aria-expanded={actionsOpen}
+            aria-controls={actionsId}
+            onClick={(event) => {
+              event.currentTarget.focus();
+              setActionsOpen(!actionsOpen);
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.currentTarget.focus();
+              setActionsOpen(true);
+            }}
+            onBlur={(event) => {
+              if (
+                !document
+                  .getElementById(actionsId)
+                  ?.contains(event.relatedTarget)
+              )
+                setActionsOpen(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Backspace" || event.key === "Delete") {
+                event.preventDefault();
+                removeTag();
+              } else if (event.key === "ArrowLeft" || event.key === "Escape") {
+                event.preventDefault();
+                setActionsOpen(false);
+                focusTitleEnd();
+              }
+            }}
           >
             #{typeLabel(type)}
           </button>
-        </span>
+        ) : null}
+      </div>
+      {type ? (
+        <div
+          id={actionsId}
+          className="pe-tag-actions"
+          contentEditable={false}
+          hidden={!actionsOpen}
+          onMouseDown={(event) => {
+            if (event.button === 0) event.preventDefault();
+          }}
+          onBlur={(event) => {
+            if (
+              event.relatedTarget !== tag.current &&
+              !event.currentTarget.contains(event.relatedTarget)
+            )
+              setActionsOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            setActionsOpen(false);
+            tag.current?.focus();
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setActionsOpen(false);
+              tag.current?.focus();
+              host.openType(type);
+            }}
+          >
+            種別の詳細を開く
+          </button>
+          <button type="button" onClick={removeTag}>
+            タグを外す
+          </button>
+        </div>
       ) : null}
     </NodeViewWrapper>
   );
@@ -219,6 +338,28 @@ const ObjectTitle = Node.create({
   renderHTML: () => ["div", { "data-object-title": "" }, 0],
   addNodeView: () =>
     ReactNodeViewRenderer(ObjectTitleView, { contentDOMElementTag: "span" }),
+  addKeyboardShortcuts() {
+    return {
+      ArrowRight: ({ editor }) => {
+        const { $from, empty } = editor.state.selection;
+        if (
+          editor.view.composing ||
+          !empty ||
+          $from.parent.type !== this.type ||
+          $from.parentOffset !== $from.parent.content.size
+        )
+          return false;
+        const title = editor.view.nodeDOM($from.before());
+        const tag =
+          title instanceof HTMLElement
+            ? title.querySelector<HTMLButtonElement>(".pe-tag")
+            : null;
+        if (!tag) return false;
+        tag.focus();
+        return true;
+      },
+    };
+  },
 });
 
 /** 文書の先頭にも、開いているObject自身のFieldを並べられるようにする。 */
@@ -431,7 +572,7 @@ const ObjectBlockView = ({
     <NodeViewWrapper
       className="pe-object"
       data-type={type}
-      data-color={definition?.color ?? undefined}
+      data-color={type ? (definition?.color ?? undefined) : "gray"}
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
     >

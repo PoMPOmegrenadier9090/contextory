@@ -131,7 +131,7 @@
 /* Object行の先頭に操作をまとめる。 */
 .pe-object {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 6px;
 }
@@ -250,8 +250,31 @@
   user-select: none;
 }
 
-.pe-editor .pe-tag:hover {
+.pe-editor .pe-tag:hover,
+.pe-editor .pe-tag:focus,
+.pe-editor .pe-tag[aria-expanded="true"] {
   background: color-mix(in srgb, var(--pe-type) 26%, transparent);
+}
+
+.pe-editor .pe-tag:focus,
+.pe-editor .pe-tag[aria-expanded="true"] {
+  outline: 1px solid var(--pe-type);
+  outline-offset: 1px;
+}
+
+.pe-tag-actions:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-block-end: 4px;
+}
+
+.pe-editor .pe-tag-actions button {
+  padding: 2px 8px;
+  background: var(--pe-surface);
+  border: 1px solid var(--pe-line);
+  border-radius: 5px;
+  font-size: 12px;
 }
 
 .pe-object[data-done="true"]

@@ -236,11 +236,60 @@ void app
               expected,
             );
           }
-          const capture = process.env.PKM_OBJECT_SMOKE_SCREENSHOT;
-          if (capture) {
-            const image = await window.capturePage();
-            require("node:fs").writeFileSync(capture, image.toPNG());
+          for (const [key, code, windowsVirtualKeyCode] of [
+            ["ArrowRight", "ArrowRight", 39],
+            ["Enter", "Enter", 13],
+            ["Backspace", "Backspace", 8],
+          ]) {
+            for (const type of ["keyDown", "keyUp"])
+              await window.webContents.debugger.sendCommand(
+                "Input.dispatchKeyEvent",
+                {
+                  type,
+                  key,
+                  code,
+                  windowsVirtualKeyCode,
+                  ...(key === "Enter" && type === "keyDown"
+                    ? { text: "\r" }
+                    : {}),
+                },
+              );
+            if (key === "ArrowRight")
+              assert.equal(
+                await window.webContents.executeJavaScript(
+                  "document.activeElement.textContent",
+                ),
+                "#Memo",
+                "Right arrow must focus the tag from the title end",
+              );
+            if (key === "Enter") {
+              assert.equal(
+                await window.webContents.executeJavaScript(
+                  'document.activeElement.getAttribute("aria-expanded")',
+                ),
+                "true",
+                "Enter must show the selected tag's actions",
+              );
+              const capture = process.env.PKM_OBJECT_SMOKE_SCREENSHOT;
+              if (capture) {
+                const image = await window.capturePage();
+                require("node:fs").writeFileSync(capture, image.toPNG());
+              }
+            }
           }
+          assert.equal(
+            await window.webContents.executeJavaScript(
+              "Boolean(document.querySelector('.pe-object[data-type=memo]'))",
+            ),
+            false,
+          );
+          assert.equal(
+            await window.webContents.executeJavaScript(
+              'document.querySelectorAll("[data-object-title]")[1].textContent',
+            ),
+            "追記",
+            "Backspace on the selected tag must preserve the title",
+          );
         } finally {
           window.webContents.debugger.detach();
         }

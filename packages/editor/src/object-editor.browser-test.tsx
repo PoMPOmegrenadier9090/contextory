@@ -11,7 +11,12 @@ export async function runObjectEditorBrowserChecks(parent: HTMLElement) {
     new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
     );
-  const object = (type: string, title: string, content: string) => ({
+  const object = (
+    type: string,
+    title: string,
+    content: string,
+    field?: { readonly name: string; readonly value: string },
+  ) => ({
     type: "objectBlock",
     attrs: { type, objectId: type, collapsed: false },
     content: [
@@ -19,11 +24,26 @@ export async function runObjectEditorBrowserChecks(parent: HTMLElement) {
         type: "objectTitle",
         content: title ? [{ type: "text", text: title }] : [],
       },
+      ...(field
+        ? [
+            {
+              type: "objectFieldControl",
+              attrs: {
+                fieldId: "due",
+                name: field.name,
+                kind: "date",
+                value: field.value,
+              },
+            },
+          ]
+        : []),
       { type: "paragraph", content: [{ type: "text", text: content }] },
     ],
   });
   let opened: string | undefined;
   let openedType: string | undefined;
+  let saved:
+    Parameters<Parameters<typeof ObjectEditor>[0]["onChange"]>[0] | undefined;
   const host: EditorHost = {
     lookup: () => undefined,
     search: () => Promise.resolve([]),
@@ -53,13 +73,19 @@ export async function runObjectEditorBrowserChecks(parent: HTMLElement) {
                 "折り返すタイトル".repeat(12),
                 "長いタイトルの本文",
               ),
+              object("project", "タグ解除", "残す本文", {
+                name: "期限",
+                value: "2026-11-14",
+              }),
               {
                 type: "paragraph",
                 content: [{ type: "text", text: "通常の段落" }],
               },
             ],
           }}
-          onChange={() => {}}
+          onChange={(doc) => {
+            saved = doc;
+          }}
         />
       </section>
     </div>,
@@ -89,11 +115,26 @@ export async function runObjectEditorBrowserChecks(parent: HTMLElement) {
     "Detail must be before the title",
   );
   assert(
+    Array.from(editor.querySelectorAll("[data-object-title]")).every(
+      (value) => value.getBoundingClientRect().left === titleLeft,
+    ),
+    "Checkbox and non-checkbox rows must align",
+  );
+  assert(
     !title.contains(tag) && !tag.isContentEditable,
     "Tag must be outside the editable title",
   );
   tag.click();
-  assert(openedType === "task", "Tag must open the type page");
+  await paint();
+  assert(
+    document.activeElement === tag &&
+      tag.getAttribute("aria-expanded") === "true",
+    "Click must select the tag and show actions",
+  );
+  const actions = document.getElementById(tag.getAttribute("aria-controls")!)!;
+  assert(!actions.hidden, "Tag actions must be visible");
+  actions.querySelector("button")!.click();
+  assert(openedType === "task", "Tag details must open the type page");
   detail.click();
   assert(opened === "task", "Vertical bar must open Object details");
   toggle.click();
@@ -111,6 +152,37 @@ export async function runObjectEditorBrowserChecks(parent: HTMLElement) {
   assert(
     editor.scrollWidth === editor.clientWidth,
     "Long titles must wrap without overflow",
+  );
+  const removable = editor.querySelector<HTMLElement>(
+    '.pe-object[data-type="project"]',
+  )!;
+  const removableTag = removable.querySelector<HTMLButtonElement>(".pe-tag")!;
+  removableTag.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+  await paint();
+  const removeActions = document.getElementById(
+    removableTag.getAttribute("aria-controls")!,
+  )!;
+  assert(!removeActions.hidden, "Right click must open tag actions");
+  removeActions.querySelectorAll("button")[1]!.click();
+  await paint();
+  assert(
+    !removable.querySelector(".pe-tag"),
+    "Removing the tag must hide the chip",
+  );
+  const untagged = saved?.content?.find(
+    (child) => child.attrs?.objectId === "project",
+  );
+  assert(
+    untagged?.attrs?.type === "",
+    "Removing the tag must retain the Object ID",
+  );
+  assert(
+    untagged?.content?.some(
+      (child) =>
+        child.content?.map((inline) => inline.text).join("") ===
+        "期限: 2026-11-14",
+    ) && removable.textContent.includes("残す本文"),
+    "Removing the tag must preserve the field value and body",
   );
   return { checks };
 }

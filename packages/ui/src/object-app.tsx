@@ -732,13 +732,15 @@ export const ObjectApp = ({
                   data-type={current.type}
                   data-color={colorOf(current.type)}
                 >
-                  <button
-                    type="button"
-                    className="od-type"
-                    onClick={() => openType(current.type)}
-                  >
-                    #{typeLabel(current.type)}
-                  </button>
+                  {current.type ? (
+                    <button
+                      type="button"
+                      className="od-type"
+                      onClick={() => openType(current.type)}
+                    >
+                      #{typeLabel(current.type)}
+                    </button>
+                  ) : null}
                   <input
                     className="od-page-title"
                     aria-label="Title"

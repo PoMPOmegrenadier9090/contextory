@@ -114,6 +114,34 @@ describe("ObjectStore", () => {
     expect(page.objects.new?.contexts).toEqual(["project"]);
   });
 
+  it("keeps an untagged object, its context and incoming references", () => {
+    store.savePage(
+      "project",
+      doc(block("entry", "task", "記録", paragraph("p1", text("本文")))),
+      10,
+    );
+    store.savePage(DAILY, doc(paragraph("ref", ref("entry"))), 11);
+    store.savePage(
+      "project",
+      doc(block("entry", "", "記録", paragraph("p1", text("本文")))),
+      12,
+    );
+    expect(store.getObject("entry")).toMatchObject({
+      type: "",
+      title: "記録",
+      contexts: ["project"],
+      createdAt: 10,
+    });
+    expect(store.loadPage(DAILY).objects.entry?.title).toBe("記録");
+    expect(body(store.loadPage("project").doc).content?.[0]).toMatchObject(
+      block("entry", "", "記録", paragraph("p1", text("本文"))),
+    );
+    expect(
+      store.objectsOfType("task").map((object) => object.id),
+    ).not.toContain("entry");
+    expect(store.types().map((type) => type.name)).not.toContain("");
+  });
+
   it("keeps contexts on later saves and deletes objects removed from the document", () => {
     const tree = doc(block("new", "task", "a", block("child", "task", "b")));
     store.savePage(DAILY, tree, 10);
