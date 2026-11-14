@@ -31,12 +31,6 @@
   outline: none;
 }
 
-.pe-editor {
-  --pe-gutter-width: 50px;
-
-  padding-inline: calc(var(--pe-gutter-width) + 8px) 14px;
-}
-
 .pe-editor .tiptap p {
   margin: 0;
   padding: 3px 0;
@@ -134,17 +128,12 @@
   outline: 2px solid var(--pe-type, var(--pe-project));
 }
 
-/* 操作は余白に置き、タイトルと通常の段落の左端を揃える。 */
+/* Object行の先頭に操作をまとめる。 */
 .pe-object {
-  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 6px;
-}
-
-.pe-object-content .pe-object {
-  margin-inline-start: var(--pe-gutter-width);
 }
 
 .pe-object:hover {
@@ -156,20 +145,19 @@
   background: color-mix(in srgb, var(--pe-type) 7%, transparent);
 }
 
-.pe-object-gutter {
-  position: absolute;
-  inset-inline-end: 100%;
+.pe-object-lead {
   display: flex;
+  gap: 2px;
   align-items: center;
-  width: var(--pe-gutter-width);
-  height: calc(1.7em + 6px);
+  height: 31px;
+  margin-inline-end: 8px;
   user-select: none;
 }
 
-.pe-object-gutter input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
+.pe-object-lead input {
+  width: 16px;
+  height: 16px;
+  margin: 0 0 0 4px;
   accent-color: var(--pe-type);
 }
 
@@ -213,8 +201,8 @@
 }
 
 /* 開閉はhover・focus時と、開いている間だけ見せる。 */
-.pe-object:hover > .pe-object-gutter > .pe-toggle,
-.pe-object:focus-within > .pe-object-gutter > .pe-toggle,
+.pe-object:hover > .pe-object-lead > .pe-toggle,
+.pe-object:focus-within > .pe-object-lead > .pe-toggle,
 .pe-toggle[aria-expanded="true"] {
   opacity: 1;
 }

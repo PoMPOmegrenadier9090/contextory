@@ -435,7 +435,7 @@ const ObjectBlockView = ({
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
     >
-      <span className="pe-object-gutter" contentEditable={false}>
+      <span className="pe-object-lead" contentEditable={false}>
         <button
           type="button"
           className="pe-toggle"

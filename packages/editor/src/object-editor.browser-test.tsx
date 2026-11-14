@@ -71,21 +71,22 @@ export async function runObjectEditorBrowserChecks(parent: HTMLElement) {
   )!;
   const title = task.querySelector<HTMLElement>("[data-object-title]")!;
   const paragraph = editor.querySelector<HTMLElement>(":scope > p")!;
-  const mainLeft = paragraph.getBoundingClientRect().left;
+  const titleLeft = title.getBoundingClientRect().left;
   const toggle = task.querySelector<HTMLButtonElement>(".pe-toggle")!;
   const detail = task.querySelector<HTMLButtonElement>(".pe-object-open")!;
   const tag = task.querySelector<HTMLButtonElement>(".pe-tag")!;
   assert(
-    title.getBoundingClientRect().left === mainLeft,
-    "Title and paragraph must align",
+    paragraph.getBoundingClientRect().left ===
+      task.getBoundingClientRect().left,
+    "Normal paragraphs must start at the Object row's edge",
   );
   assert(
-    toggle.getBoundingClientRect().right <= mainLeft,
-    "Toggle must be outside the text column",
+    toggle.getBoundingClientRect().left === task.getBoundingClientRect().left,
+    "Toggle must start inside the Object row",
   );
   assert(
-    detail.getBoundingClientRect().right <= mainLeft,
-    "Detail must be outside the text column",
+    detail.getBoundingClientRect().right < titleLeft,
+    "Detail must be before the title",
   );
   assert(
     !title.contains(tag) && !tag.isContentEditable,
