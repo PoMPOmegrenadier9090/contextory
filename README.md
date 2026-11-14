@@ -14,7 +14,7 @@ Contextoryは、自由に書いた文書の中で、まとまりをObjectとし�
 - `#`に知らない名前を入れると、新しい種別を作る
 - 種別ごとにFieldを定義する。Contextはどの種別にもある特別なFieldで、そのObjectがどこに属するかを表す
 - `@`で他のObjectに言及すると、参照先のTimelineにその記述が出る
-- Quick Capture（⌘⇧M）でMemoを今日のDailyに足す。開いているProjectなどをContextに付けられる
+- Quick Capture（⌘⇧M）で、本文と同じエディタでMemoを書き、今日のDailyに足す。開いているProjectなどをContextに付けられる
 - Dailyの「この日のMemo」で、ほかの文書でその日に作ったMemoを読み、そのまま編集する
 
 ## Macで始める

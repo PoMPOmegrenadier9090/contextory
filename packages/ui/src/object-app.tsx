@@ -1,6 +1,4 @@
 import {
-  CONTEXT_FIELD,
-  fieldNode,
   inheritedContexts,
   isPageConflict,
   newId,
@@ -18,6 +16,7 @@ import {
 import { ObjectEditor, typeLabel, type EditorHost } from "@pkm/editor";
 import { useEffect, useRef, useState } from "react";
 
+import { captureDoc, captureMemo } from "./capture.js";
 import { DayMemoCard } from "./day-memo.js";
 import {
   dailyDate,
@@ -326,11 +325,14 @@ export const ObjectApp = ({
   const [creating, setCreating] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createType, setCreateType] = useState<ObjectType>("project");
-  /** Quick Captureの入力。contextは保存前に外せるContextの候補。 */
+  /** Quick Captureの書き始めの文書。keyで作り直す。 */
   const [capture, setCapture] = useState<{
-    readonly text: string;
-    readonly context: string | null;
+    readonly key: number;
+    readonly doc: DocNode;
   } | null>(null);
+  /** Quick Captureで書いている最新の文書 */
+  const captured = useRef<DocNode | null>(null);
+  const [canCapture, setCanCapture] = useState(false);
 
   // 書き込みは一本の列に並べ、作成→本文保存の順序を保つ。
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -538,11 +540,16 @@ export const ObjectApp = ({
     openType: (type) => openType(type),
   };
 
-  const startCapture = (): void =>
-    setCapture(
-      (last) =>
-        last ?? { text: "", context: current && !typePage ? current.id : null },
-    );
+  const showCapture = (doc: DocNode): void => {
+    captured.current = doc;
+    setCanCapture(captureMemo(doc) !== null);
+    setCapture({ key: ++loads.current, doc });
+  };
+  // Objectのページで開いたら、そのObjectをContextにして始める。行から消せる。
+  const startCapture = (): void => {
+    if (!capture)
+      showCapture(captureDoc(current && !typePage ? current.id : null));
+  };
   const shortcut = useRef(startCapture);
   shortcut.current = startCapture;
   useEffect(() => {
@@ -560,47 +567,11 @@ export const ObjectApp = ({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /** 1行目をTitle、残りを本文にしたMemoを、今日のDailyの末尾に足す。 */
+  /** 書いたMemoを、今日のDailyの末尾に足す。 */
   const saveCapture = (): void => {
-    if (!capture?.text.trim()) return;
-    const input = capture;
-    const [first = "", ...rest] = input.text.split("\n");
-    const memo: DocNode = {
-      type: "objectBlock",
-      attrs: {
-        id: newId(),
-        objectId: newId(),
-        type: "memo",
-        done: false,
-        // 本文があれば開いて置き、Dailyでそのまま読めるようにする。
-        collapsed: !rest.some((line) => line.trim()),
-      },
-      content: [
-        first.trim()
-          ? {
-              type: "objectTitle",
-              content: [{ type: "text", text: first.trim() }],
-            }
-          : { type: "objectTitle" },
-        ...(input.context
-          ? [
-              fieldNode({
-                ...CONTEXT_FIELD,
-                value: [
-                  { type: "objectRef", attrs: { objectId: input.context } },
-                ],
-              }),
-            ]
-          : []),
-        ...rest
-          .filter((line) => line.trim())
-          .map((line) => ({
-            type: "paragraph",
-            attrs: { id: newId() },
-            content: [{ type: "text", text: line }],
-          })),
-      ],
-    };
+    const input = captured.current;
+    const memo = input && captureMemo(input);
+    if (!input || !memo) return;
     const daily = dailyHostId();
     flush();
     setCapture(null);
@@ -624,7 +595,7 @@ export const ObjectApp = ({
         } catch (error) {
           if (isPageConflict(error) && attempt < 2) continue;
           // 書いた内容を失わないよう、入力欄に戻す。
-          setCapture(input);
+          showCapture(input);
           throw error;
         }
       }
@@ -792,14 +763,22 @@ export const ObjectApp = ({
             role="dialog"
             aria-modal="true"
             aria-labelledby="od-capture-title"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setCapture(null);
+            // エディタより先に受ける。⌘Enterを改行にせず、Escapeはメニューが無い時だけ閉じる。
+            onKeyDownCapture={(event) => {
+              if (
+                event.key === "Escape" &&
+                !document.querySelector(".pe-menu")
+              ) {
+                event.stopPropagation();
+                setCapture(null);
+              }
               if (
                 event.key === "Enter" &&
                 (event.metaKey || event.ctrlKey) &&
                 !event.nativeEvent.isComposing
               ) {
                 event.preventDefault();
+                event.stopPropagation();
                 saveCapture();
               }
             }}
@@ -809,39 +788,24 @@ export const ObjectApp = ({
             }}
           >
             <h2 id="od-capture-title">Memoを今日のDailyに追加</h2>
-            <textarea
-              autoFocus
-              aria-label="Memo"
-              placeholder="1行目がTitle、2行目からが本文"
-              rows={5}
-              value={capture.text}
-              onChange={(event) => {
-                const text = event.currentTarget.value;
-                setCapture((last) => last && { ...last, text });
-              }}
-            />
-            {capture.context ? (
-              <p className="od-capture-context">
-                Context
-                <span>
-                  {objects[capture.context]?.title ?? "無題"}
-                  <button
-                    type="button"
-                    aria-label="Contextを外す"
-                    onClick={() =>
-                      setCapture((last) => last && { ...last, context: null })
-                    }
-                  >
-                    ×
-                  </button>
-                </span>
-              </p>
-            ) : null}
+            <div className="od-document od-capture-editor">
+              <ObjectEditor
+                key={capture.key}
+                initialDoc={capture.doc}
+                host={host}
+                ariaLabel="Quick Capture"
+                autofocus
+                onChange={(doc) => {
+                  captured.current = doc;
+                  setCanCapture(captureMemo(doc) !== null);
+                }}
+              />
+            </div>
             <div className="od-dialog-actions">
               <button type="button" onClick={() => setCapture(null)}>
                 キャンセル
               </button>
-              <button type="submit" disabled={!capture.text.trim()}>
+              <button type="submit" disabled={!canCapture}>
                 追加（⌘Enter）
               </button>
             </div>

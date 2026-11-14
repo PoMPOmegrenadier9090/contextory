@@ -729,46 +729,7 @@ body,
 
 /* Quick Capture */
 .od-capture {
-  width: min(520px, 100%);
-}
-
-.od-capture textarea {
-  padding: 10px;
-  font: inherit;
-  line-height: 1.6;
-  color: var(--od-ink);
-  background: var(--od-surface);
-  border: 1px solid var(--od-line-strong);
-  border-radius: 7px;
-  resize: vertical;
-}
-
-.od-capture-context {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin: 0;
-  color: var(--od-muted);
-  font-size: 12px;
-}
-
-.od-capture-context span {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 2px 4px 2px 8px;
-  color: var(--od-ink);
-  background: var(--od-subtle);
-  border: 1px solid var(--od-line);
-  border-radius: 999px;
-}
-
-.od-capture-context button {
-  padding: 0 4px;
-  color: var(--od-muted);
-  background: none;
-  border: 0;
-  cursor: pointer;
+  width: min(560px, 100%);
 }
 
 /* Dailyの「この日のMemo」 */
@@ -838,4 +799,14 @@ body,
 
 .od-day-memo .pe-editor .tiptap {
   min-height: 0;
+}
+
+.od-capture-editor {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-left: 10px;
+}
+
+.od-capture-editor .pe-editor .tiptap {
+  min-height: 96px;
 }

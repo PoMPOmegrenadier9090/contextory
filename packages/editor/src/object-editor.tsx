@@ -31,6 +31,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type RefObject,
@@ -970,12 +971,15 @@ export const ObjectEditor = ({
   host,
   onChange,
   ariaLabel,
+  autofocus = false,
 }: {
   /** 開いた時点の文書。以後の内容はエディタが持つので、文書を切り替える時はkeyで作り直す。 */
   readonly initialDoc: DocNode;
   readonly host: EditorHost;
   readonly onChange: (doc: DocNode) => void;
   readonly ariaLabel: string;
+  /** 開いた時に文書の先頭へカーソルを置く。 */
+  readonly autofocus?: boolean;
 }): React.JSX.Element => {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [active, setActive] = useState(0);
@@ -1045,6 +1049,10 @@ export const ObjectEditor = ({
     onUpdate: ({ editor: updated }) =>
       latest.current.onChange(updated.getJSON() as DocNode),
   });
+  // tiptapのautofocusは次のフレームまで待つので、開いた直後の入力を落とさないようすぐに置く。
+  useLayoutEffect(() => {
+    if (autofocus) editor?.commands.focus("start");
+  }, [editor]);
 
   // 画面外でメニューが残らないよう、エディタを離れたら閉じる。
   useEffect(() => () => setMenu(null), []);
