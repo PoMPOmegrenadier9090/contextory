@@ -538,6 +538,20 @@ export const ObjectApp = ({
     },
     open,
     openType: (type) => openType(type),
+    // 継承したFieldは、定義している種別の選択肢に足す。
+    addOption: (fieldId, option) => {
+      const definer = types.find((definition) =>
+        definition.fields.some((field) => field.id === fieldId),
+      );
+      if (definer)
+        patchType(definer.name, {
+          fields: definer.fields.map((field) =>
+            field.id === fieldId
+              ? { ...field, options: [...(field.options ?? []), option] }
+              : field,
+          ),
+        });
+    },
   };
 
   const showCapture = (input: CaptureInput): void => {

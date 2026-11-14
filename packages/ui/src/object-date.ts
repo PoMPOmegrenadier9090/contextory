@@ -1,9 +1,8 @@
-const DAILY_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import { localDate } from "@pkm/editor";
 
-export const localDate = (date = new Date()): string => {
-  const pad = (value: number): string => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
+export { localDate };
+
+const DAILY_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const dailyHostId = (date = localDate()): string => `daily:${date}`;
 

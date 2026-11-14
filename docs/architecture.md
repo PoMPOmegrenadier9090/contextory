@@ -10,7 +10,7 @@
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
 | `packages/core`         | Object・文書・種別の型、文書の分割と結合、入力検証、`ObjectClient`契約とHTTP実装                                   | `object-model.ts`、`object-document.ts`、`object-http-client.ts` |
 | `packages/storage-node` | SQLiteの`ObjectStore`。Object、文書、種別、Field、言及の索引                                                       | `object-store.ts`                                                |
-| `packages/editor`       | TiptapによるObject文書エディタ。`@`・`#`のメニュー、Field行                                                        | `object-editor.tsx`                                              |
+| `packages/editor`       | TiptapによるObject文書エディタ。`@`・`#`のメニュー、Field行。表と共用する窓・候補・日付の部品                      | `object-editor.tsx`、`view-controls.tsx`                         |
 | `packages/ui`           | WebとDesktopで共有する画面。Daily、この日のMemo、Quick Capture、View（表とTimeline）、種別のページと設定、保存の列 | `object-app.tsx`、`views.tsx`、`day-memo.tsx`                    |
 | `apps/server`           | `ObjectStore`を開き、HTTP APIとWebの静的ファイルを配信する                                                         | `http-api.ts`、`object-api.ts`                                   |
 | `apps/web`              | Web画面の起動とService Worker                                                                                      | `main.tsx`、`service-worker.ts`                                  |

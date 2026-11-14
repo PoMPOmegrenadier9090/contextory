@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import { localDate } from "./object-date.js";
+/** 端末の時刻での日付（YYYY-MM-DD）。 */
+export const localDate = (date = new Date()): string => {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
 
 /** ボタンの下に開く小さな窓。外を押すか、Escapeで閉じる。 */
 export const Popover = ({

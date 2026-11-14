@@ -45,6 +45,7 @@ import {
 } from "@pkm/core";
 
 import { conversionAt } from "./object-conversion.js";
+import { DatePanel, formatDate, Chooser, Popover } from "./view-controls.js";
 
 /** エディタが表示に使うObjectの情報。 */
 export interface EditorObject {
@@ -70,6 +71,8 @@ export interface EditorHost {
   readonly page: { readonly id: string; readonly type: ObjectType } | null;
   /** 種別のページを開く。 */
   readonly openType: (type: ObjectType) => void;
+  /** 選択のFieldに、新しい選択肢を足す。 */
+  readonly addOption: (fieldId: string, option: string) => void;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -212,45 +215,89 @@ const leaveField = (editor: Editor): boolean => {
     .run();
 };
 
-/** 日付や選択肢を選ぶFieldの行。文字は打てない。 */
+/** 日付や選択肢を選ぶFieldの行。文字は打てず、小さな窓から選ぶ。 */
 const FieldControlView = ({
   node,
   updateAttributes,
 }: NodeViewProps): React.JSX.Element => {
+  const host = useHost();
   const value = String(node.attrs.value);
-  const options = node.attrs.options as readonly string[];
+  const name = String(node.attrs.name);
+  const fieldId = String(node.attrs.fieldId);
+  // 選択肢は、作成時に写したものより今の種別の定義を使う。
+  const defined = host
+    .types()
+    .flatMap((type) => type.fields)
+    .find((field) => field.id === fieldId)?.options;
+  const options = defined ?? (node.attrs.options as readonly string[]);
+  const set = (next: string): void => {
+    if (next !== value) updateAttributes({ value: next });
+  };
+  const empty = <span className="pe-field-empty">空</span>;
   return (
     <NodeViewWrapper
       data-object-field=""
-      data-label={String(node.attrs.name)}
+      data-label={name}
       contentEditable={false}
     >
       {node.attrs.kind === "date" ? (
-        <input
-          type="date"
-          aria-label={String(node.attrs.name)}
-          value={value}
-          onChange={(event) =>
-            updateAttributes({ value: event.currentTarget.value })
-          }
-        />
-      ) : (
-        <select
-          aria-label={String(node.attrs.name)}
-          value={value}
-          onChange={(event) =>
-            updateAttributes({ value: event.currentTarget.value })
-          }
+        <Popover
+          className="pe-field-pop"
+          ariaLabel={name}
+          label={value ? formatDate(value) : empty}
         >
-          <option value="">—</option>
-          {[...new Set([...options, ...(value ? [value] : [])])].map(
-            (option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ),
+          {(close) => (
+            <DatePanel
+              value={value}
+              onPick={(date) => {
+                close();
+                set(date);
+              }}
+            />
           )}
-        </select>
+        </Popover>
+      ) : (
+        <Popover
+          className="pe-field-pop"
+          ariaLabel={name}
+          label={value ? <span className="od-pill">{value}</span> : empty}
+        >
+          {(close) => (
+            <>
+              <Chooser
+                placeholder="選ぶか、新しい値を入力"
+                load={(query) =>
+                  options
+                    .filter((option) => option.includes(query.trim()))
+                    .map((option) => ({ key: option, label: option }))
+                }
+                onPick={(choice) => {
+                  close();
+                  set(choice.key);
+                }}
+                // 候補に無い値は、種別の選択肢にも足す。
+                onCreate={(created) => {
+                  close();
+                  set(created);
+                  host.addOption(fieldId, created);
+                }}
+              />
+              {value ? (
+                <div className="od-menu">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      close();
+                      set("");
+                    }}
+                  >
+                    値を消す
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </Popover>
       )}
     </NodeViewWrapper>
   );

@@ -14,10 +14,6 @@ import {
   type ViewResult,
   type ViewRow,
 } from "@pkm/core";
-import { typeLabel } from "@pkm/editor";
-import { useEffect, useState } from "react";
-
-import { dateRange, localDate } from "./object-date.js";
 import {
   CheckItem,
   Chooser,
@@ -25,7 +21,11 @@ import {
   formatDate,
   Popover,
   Segmented,
-} from "./view-controls.js";
+  typeLabel,
+} from "@pkm/editor";
+import { useEffect, useState } from "react";
+
+import { dateRange, localDate } from "./object-date.js";
 
 export const KIND_LABEL = {
   text: "テキスト",
