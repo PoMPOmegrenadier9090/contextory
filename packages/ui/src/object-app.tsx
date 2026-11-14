@@ -692,14 +692,12 @@ export const ObjectApp = ({
             <dd>参照・新規作成</dd>
             <dt>#</dt>
             <dd>BlockをObject化</dd>
-            <dt>⌘↵</dt>
-            <dd>Objectを開閉</dd>
             <dt>Enter</dt>
             <dd>Titleや空行からObjectの外へ</dd>
             <dt>⌫</dt>
             <dd>Title先頭でObjectを解除</dd>
           </dl>
-          <p className="od-nav-note">SQLiteへ保存</p>
+          <p className="od-nav-note">サーバーのSQLiteへ保存</p>
         </nav>
         <main className="od-main">
           {typePage ? (
@@ -732,15 +730,13 @@ export const ObjectApp = ({
                   data-type={current.type}
                   data-color={colorOf(current.type)}
                 >
-                  {current.type ? (
-                    <button
-                      type="button"
-                      className="od-type"
-                      onClick={() => openType(current.type)}
-                    >
-                      #{typeLabel(current.type)}
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    className="od-type"
+                    onClick={() => openType(current.type)}
+                  >
+                    #{typeLabel(current.type)}
+                  </button>
                   <input
                     className="od-page-title"
                     aria-label="Title"

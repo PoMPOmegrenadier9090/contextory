@@ -1,11 +1,8 @@
 import UniqueID from "@tiptap/extension-unique-id";
 import { GapCursor } from "@tiptap/pm/gapcursor";
-import {
-  Fragment,
-  type Node as PMNode,
-  type ResolvedPos,
-} from "@tiptap/pm/model";
+import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
   EditorContent,
   Extension,
@@ -15,7 +12,6 @@ import {
   NodeViewWrapper,
   ReactNodeViewRenderer,
   useEditor,
-  useEditorState,
   type Editor,
   type JSONContent,
   type NodeViewProps,
@@ -30,10 +26,8 @@ import {
   createContext,
   useContext,
   useEffect,
-  useId,
   useRef,
   useState,
-  type MouseEvent,
   type RefObject,
 } from "react";
 import {
@@ -72,7 +66,6 @@ export interface EditorHost {
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  "": "タグなし",
   area: "Area",
   project: "Project",
   task: "Task",
@@ -97,12 +90,6 @@ const enclosingObjectId = (editor: Editor, pos: number): string | null => {
     if (node.type.name === "objectBlock") return String(node.attrs.objectId);
   }
   return null;
-};
-
-const enclosingObjectDepth = ($pos: ResolvedPos): number => {
-  for (let depth = $pos.depth; depth > 0; depth--)
-    if ($pos.node(depth).type.name === "objectBlock") return depth;
-  return -1;
 };
 
 const typeOf = (
@@ -173,193 +160,12 @@ const ObjectRef = Node.create({
   addNodeView: () => ReactNodeViewRenderer(RefChip, { as: "span" }),
 });
 
-const ObjectTitleView = ({
-  editor,
-  getPos,
-  node,
-}: NodeViewProps): React.JSX.Element => {
-  const host = useHost();
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const actionsId = useId();
-  const tag = useRef<HTMLButtonElement>(null);
-  const type = useEditorState({
-    editor,
-    selector: ({ editor: current }) => {
-      const pos = getPos();
-      return pos === undefined || pos > current.state.doc.content.size
-        ? null
-        : (current.state.doc.resolve(pos).parent.attrs.type as
-            ObjectType | undefined);
-    },
-  });
-  const focusTitleEnd = (): void => {
-    const start = getPos();
-    if (start === undefined) return;
-    editor.commands.setTextSelection(start + node.nodeSize - 1);
-    editor.view.focus();
-  };
-  const removeTag = (): void => {
-    const start = getPos();
-    if (start === undefined) return;
-    editor.commands.command(({ tr, state }) => {
-      const $title = tr.doc.resolve(start);
-      const object = $title.parent;
-      const objectPos = $title.before();
-      const afterTitle = start + node.nodeSize;
-      const contexts: PMNode[] = [];
-      const values: PMNode[] = [];
-      let end = afterTitle;
-      for (let i = 1; i < object.childCount; i++) {
-        const field = object.child(i);
-        if (!isField(field)) break;
-        end += field.nodeSize;
-        if (field.attrs.fieldId === CONTEXT_FIELD.id) contexts.push(field);
-        else if (field.content.size || field.attrs.value) {
-          const paragraph = state.schema.nodes.paragraph!;
-          const label = state.schema.text(`${String(field.attrs.name)}: `);
-          const value = field.content.size
-            ? field.content
-            : Fragment.from(state.schema.text(String(field.attrs.value)));
-          values.push(
-            paragraph.create(null, Fragment.from(label).append(value)),
-          );
-        }
-      }
-      tr.setNodeAttribute(objectPos, "type", "");
-      if (values.length) tr.setNodeAttribute(objectPos, "collapsed", false);
-      // 種別固有の入力済みFieldは、解除しても本文に残す。
-      tr.replaceWith(afterTitle, end, [...contexts, ...values]);
-      tr.setSelection(TextSelection.create(tr.doc, afterTitle - 1));
-      return true;
-    });
-    setActionsOpen(false);
-    editor.view.focus();
-  };
-  return (
-    <NodeViewWrapper>
-      <div
-        className="pe-object-title"
-        onMouseDown={(event: MouseEvent<HTMLDivElement>) => {
-          if (event.button !== 0 || event.target !== event.currentTarget)
-            return;
-          // タグの脇の余白をクリックしたときは、タイトルの末尾へ戻す。
-          event.preventDefault();
-          focusTitleEnd();
-        }}
-      >
-        <NodeViewContent<"span"> as="span" data-object-title="" />
-        {type ? (
-          <button
-            type="button"
-            className="pe-tag"
-            contentEditable={false}
-            ref={tag}
-            aria-expanded={actionsOpen}
-            aria-controls={actionsId}
-            onClick={(event) => {
-              event.currentTarget.focus();
-              setActionsOpen(!actionsOpen);
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              event.currentTarget.focus();
-              setActionsOpen(true);
-            }}
-            onBlur={(event) => {
-              if (
-                !document
-                  .getElementById(actionsId)
-                  ?.contains(event.relatedTarget)
-              )
-                setActionsOpen(false);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Backspace" || event.key === "Delete") {
-                event.preventDefault();
-                removeTag();
-              } else if (event.key === "ArrowLeft" || event.key === "Escape") {
-                event.preventDefault();
-                setActionsOpen(false);
-                focusTitleEnd();
-              }
-            }}
-          >
-            #{typeLabel(type)}
-          </button>
-        ) : null}
-      </div>
-      {type ? (
-        <div
-          id={actionsId}
-          className="pe-tag-actions"
-          contentEditable={false}
-          hidden={!actionsOpen}
-          onMouseDown={(event) => {
-            if (event.button === 0) event.preventDefault();
-          }}
-          onBlur={(event) => {
-            if (
-              event.relatedTarget !== tag.current &&
-              !event.currentTarget.contains(event.relatedTarget)
-            )
-              setActionsOpen(false);
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            setActionsOpen(false);
-            tag.current?.focus();
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setActionsOpen(false);
-              tag.current?.focus();
-              host.openType(type);
-            }}
-          >
-            種別の詳細を開く
-          </button>
-          <button type="button" onClick={removeTag}>
-            タグを外す
-          </button>
-        </div>
-      ) : null}
-    </NodeViewWrapper>
-  );
-};
-
 const ObjectTitle = Node.create({
   name: "objectTitle",
   content: "inline*",
   defining: true,
   parseHTML: () => [{ tag: "div[data-object-title]" }],
   renderHTML: () => ["div", { "data-object-title": "" }, 0],
-  addNodeView: () =>
-    ReactNodeViewRenderer(ObjectTitleView, { contentDOMElementTag: "span" }),
-  addKeyboardShortcuts() {
-    return {
-      ArrowRight: ({ editor }) => {
-        const { $from, empty } = editor.state.selection;
-        if (
-          editor.view.composing ||
-          !empty ||
-          $from.parent.type !== this.type ||
-          $from.parentOffset !== $from.parent.content.size
-        )
-          return false;
-        const title = editor.view.nodeDOM($from.before());
-        const tag =
-          title instanceof HTMLElement
-            ? title.querySelector<HTMLButtonElement>(".pe-tag")
-            : null;
-        if (!tag) return false;
-        tag.focus();
-        return true;
-      },
-    };
-  },
 });
 
 /** 文書の先頭にも、開いているObject自身のFieldを並べられるようにする。 */
@@ -572,17 +378,17 @@ const ObjectBlockView = ({
     <NodeViewWrapper
       className="pe-object"
       data-type={type}
-      data-color={type ? (definition?.color ?? undefined) : "gray"}
+      data-color={definition?.color ?? undefined}
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
     >
+      {/* Tanaと同じく、行頭に開閉と「開く」を置いて、マウスの移動を減らす。 */}
       <span className="pe-object-lead" contentEditable={false}>
         <button
           type="button"
           className="pe-toggle"
           aria-expanded={!collapsed}
           aria-label={collapsed ? "展開" : "畳む"}
-          aria-keyshortcuts="Meta+Enter Control+Enter"
           onClick={toggle}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -591,9 +397,9 @@ const ObjectBlockView = ({
         </button>
         <button
           type="button"
-          className="pe-object-open"
-          aria-label="Objectを開く"
-          title="Objectを開く"
+          className="pe-bullet"
+          data-has-body={hasBody}
+          aria-label="開く"
           onClick={() => host.open(id)}
         />
         {checkbox ? (
@@ -606,14 +412,12 @@ const ObjectBlockView = ({
         ) : null}
       </span>
       <NodeViewContent className="pe-object-content" />
-      {collapsed && values.length ? (
-        <span className="pe-object-side" contentEditable={false}>
-          {values.slice(0, SIDE_VALUES)}
-          {values.length > SIDE_VALUES ? (
-            <span className="pe-value">+{values.length - SIDE_VALUES}</span>
-          ) : null}
-        </span>
-      ) : null}
+      <span className="pe-object-side" contentEditable={false}>
+        {collapsed ? values.slice(0, SIDE_VALUES) : null}
+        {collapsed && values.length > SIDE_VALUES ? (
+          <span className="pe-value">+{values.length - SIDE_VALUES}</span>
+        ) : null}
+      </span>
     </NodeViewWrapper>
   );
 };
@@ -638,21 +442,6 @@ const ObjectBlock = Node.create({
   addNodeView: () => ReactNodeViewRenderer(ObjectBlockView),
   addKeyboardShortcuts() {
     return {
-      "Mod-Enter": ({ editor }) => {
-        const { $from } = editor.state.selection;
-        const depth = enclosingObjectDepth($from);
-        if (depth < 0) return false;
-        return editor.commands.command(({ tr }) => {
-          const object = $from.node(depth);
-          const at = $from.before(depth);
-          tr.setNodeAttribute(at, "collapsed", !object.attrs.collapsed);
-          if (!object.attrs.collapsed)
-            tr.setSelection(
-              TextSelection.create(tr.doc, at + object.firstChild!.nodeSize),
-            );
-          return true;
-        });
-      },
       Enter: ({ editor }) => {
         const { $from, empty } = editor.state.selection;
         const depth = $from.depth - 1;
@@ -710,6 +499,42 @@ const ObjectBlock = Node.create({
     };
   },
 });
+
+/** 種別のタグをTitleの行末に置く。押すと種別のページを開く。 */
+const createTags = (host: RefObject<EditorHost>): Extension =>
+  Extension.create({
+    name: "objectTags",
+    addProseMirrorPlugins: () => [
+      new Plugin({
+        props: {
+          decorations: (state) => {
+            const tags: Decoration[] = [];
+            state.doc.descendants((node, pos) => {
+              if (node.type.name !== "objectBlock") return;
+              const type = String(node.attrs.type);
+              tags.push(
+                Decoration.widget(
+                  pos + node.firstChild!.nodeSize,
+                  () => {
+                    const tag = document.createElement("button");
+                    tag.type = "button";
+                    tag.className = "pe-tag";
+                    tag.contentEditable = "false";
+                    tag.textContent = `#${typeLabel(type)}`;
+                    tag.onmousedown = (event) => event.preventDefault();
+                    tag.onclick = () => host.current.openType(type);
+                    return tag;
+                  },
+                  { side: 1, key: `tag-${type}`, ignoreSelection: true },
+                ),
+              );
+            });
+            return DecorationSet.create(state.doc, tags);
+          },
+        },
+      }),
+    ],
+  });
 
 /**
  * 畳んだObjectの見えていない行と、Fieldの行のすき間へ、カーソルが入らないようにする。
@@ -801,114 +626,6 @@ const insertRef = (editor: Editor, range: Range, objectId: string): void => {
     .run();
 };
 
-interface ObjectConversionTarget {
-  readonly receiverDepth: number;
-  readonly fromIndex: number;
-  readonly toIndex: number;
-  readonly from: number;
-  readonly to: number;
-  readonly title: PMNode["content"];
-  readonly body: readonly PMNode[];
-  readonly before: readonly PMNode[];
-  readonly after: readonly PMNode[];
-}
-
-/** 見出しはSection、リストでは項目と子を、Objectへ移す単位にする。 */
-export const objectConversionTargetAt = (
-  $pos: ResolvedPos,
-): ObjectConversionTarget | null => {
-  const block = $pos.parent;
-  const depth = $pos.depth;
-  if (depth < 1) return null;
-
-  if (block.type.name === "paragraph") {
-    const parent = $pos.node(depth - 1);
-    if (
-      parent.type.name === "listItem" &&
-      $pos.index(depth - 1) === 0 &&
-      depth >= 2
-    ) {
-      const listDepth = depth - 2;
-      const list = $pos.node(listDepth);
-      if (list.type.name !== "bulletList" && list.type.name !== "orderedList")
-        return null;
-      const itemIndex = $pos.index(listDepth);
-      const items = Array.from({ length: list.childCount }, (_, index) =>
-        list.child(index),
-      );
-      const before = itemIndex
-        ? [list.type.create(list.attrs, items.slice(0, itemIndex))]
-        : [];
-      const afterItems = items.slice(itemIndex + 1);
-      const after = afterItems.length
-        ? [
-            list.type.create(
-              list.type.name === "orderedList"
-                ? {
-                    ...list.attrs,
-                    start: Number(list.attrs.start ?? 1) + itemIndex + 1,
-                  }
-                : list.attrs,
-              afterItems,
-            ),
-          ]
-        : [];
-      return {
-        receiverDepth: listDepth - 1,
-        fromIndex: $pos.index(listDepth - 1),
-        toIndex: $pos.index(listDepth - 1) + 1,
-        from: $pos.before(listDepth),
-        to: $pos.after(listDepth),
-        title: block.content,
-        body: Array.from({ length: parent.childCount - 1 }, (_, index) =>
-          parent.child(index + 1),
-        ),
-        before,
-        after,
-      };
-    }
-    const index = $pos.index(depth - 1);
-    return {
-      receiverDepth: depth - 1,
-      fromIndex: index,
-      toIndex: index + 1,
-      from: $pos.before(depth),
-      to: $pos.after(depth),
-      title: block.content,
-      body: [],
-      before: [],
-      after: [],
-    };
-  }
-
-  if (block.type.name !== "heading") return null;
-  const parent = $pos.node(depth - 1);
-  const index = $pos.index(depth - 1);
-  const level = Number(block.attrs.level);
-  let toIndex = index + 1;
-  let to = $pos.after(depth);
-  const body: PMNode[] = [];
-  while (toIndex < parent.childCount) {
-    const child = parent.child(toIndex);
-    if (child.type.name === "heading" && Number(child.attrs.level) <= level)
-      break;
-    body.push(child);
-    to += child.nodeSize;
-    toIndex++;
-  }
-  return {
-    receiverDepth: depth - 1,
-    fromIndex: index,
-    toIndex,
-    from: $pos.before(depth),
-    to,
-    title: block.content,
-    body,
-    before: [],
-    after: [],
-  };
-};
-
 const atItems = async (
   host: EditorHost,
   query: string,
@@ -946,6 +663,8 @@ const convertBlock = (
     .deleteRange(range)
     .command(({ tr, state }) => {
       const $pos = tr.selection.$from;
+      const block = $pos.parent;
+      const depth = $pos.depth;
       const {
         objectBlock,
         objectTitle,
@@ -954,8 +673,11 @@ const convertBlock = (
         objectRef,
         paragraph,
       } = state.schema.nodes;
-      const target = objectConversionTargetAt($pos);
-      if (!target) return false;
+      if (block.type !== paragraph || depth < 1) return false;
+      const index = $pos.index(depth - 1);
+      // リスト項目の先頭段落など、Objectを置けない場所では変換しない。
+      if (!$pos.node(depth - 1).canReplaceWith(index, index + 1, objectBlock!))
+        return false;
       // Fieldの行は作成時に並べる。Contextには置かれた場所から継ぐ値を入れる。
       const definition = typeOf(host, type);
       const fields = (
@@ -981,30 +703,14 @@ const convertBlock = (
             ),
       );
       const object = objectBlock!.create({ objectId: newId(), type }, [
-        objectTitle!.create(null, target.title),
+        objectTitle!.create(null, block.content),
         ...fields,
-        ...target.body,
       ]);
-      const replacement = [
-        ...target.before,
+      const start = $pos.before(depth);
+      tr.replaceWith(start, start + block.nodeSize, [
         object,
-        paragraph!.create(),
-        ...target.after,
-      ];
-      if (
-        !$pos
-          .node(target.receiverDepth)
-          .canReplace(
-            target.fromIndex,
-            target.toIndex,
-            Fragment.fromArray(replacement),
-          )
-      )
-        return false;
-      tr.replaceWith(target.from, target.to, replacement);
-      const start =
-        target.from +
-        target.before.reduce((size, node) => size + node.nodeSize, 0);
+        paragraph.create(),
+      ]);
       tr.setSelection(
         TextSelection.create(tr.doc, start + object.nodeSize + 1),
       );
@@ -1175,6 +881,7 @@ export const ObjectEditor = ({
       ObjectFieldControl,
       ObjectBlock,
       CollapsedGuard,
+      createTags(hostRef),
       createMenus(bridge, hostRef),
     ],
     content: initialDoc as JSONContent,

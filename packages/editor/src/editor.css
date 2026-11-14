@@ -128,10 +128,10 @@
   outline: 2px solid var(--pe-type, var(--pe-project));
 }
 
-/* Object行の先頭に操作をまとめる。 */
+/* object block: 行頭に開閉と「開く」、1行目はTitle、開いた時だけFieldと本文を出す */
 .pe-object {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
   border-radius: 6px;
 }
@@ -147,52 +147,47 @@
 
 .pe-object-lead {
   display: flex;
+  gap: 2px;
   align-items: center;
   height: 31px;
-  margin-inline: -10px 4px;
+  margin-right: 8px;
   user-select: none;
 }
 
 .pe-object-lead input {
   width: 16px;
   height: 16px;
-  margin: 0;
+  margin: 0 0 0 4px;
   accent-color: var(--pe-type);
 }
 
-.pe-toggle,
-.pe-object-open {
+.pe-toggle {
   display: grid;
   place-items: center;
-  width: 16px;
+  width: 24px;
   height: 24px;
   padding: 0;
   color: var(--pe-muted);
   background: none;
   border: 0;
-  border-radius: 4px;
+  border-radius: 50%;
   cursor: pointer;
-}
-
-.pe-toggle {
   opacity: 0;
 }
 
-.pe-toggle:hover,
-.pe-object-open:hover {
+.pe-toggle:hover {
   color: inherit;
   background: color-mix(in srgb, var(--pe-type) 16%, transparent);
 }
 
 .pe-toggle svg {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentcolor;
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
-  pointer-events: none;
 }
 
 .pe-toggle[aria-expanded="true"] svg {
@@ -212,29 +207,34 @@
   }
 }
 
-/* 種別色の縦棒からObjectの詳細を開く。 */
-.pe-object-open::before {
-  width: 3px;
-  height: 14px;
+/* 行頭の点。押すとObjectを開く。畳んだ中身があれば輪を付ける。 */
+.pe-bullet {
+  box-sizing: content-box;
+  width: 8px;
+  height: 8px;
+  padding: 0;
   background: var(--pe-type);
-  border-radius: 2px;
-  content: "";
+  background-clip: content-box;
+  border: 6px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
 }
 
-.pe-object-title {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
+.pe-bullet[data-has-body="true"] {
+  border-color: color-mix(in srgb, var(--pe-type) 28%, transparent);
+}
+
+.pe-bullet:hover {
+  border-color: color-mix(in srgb, var(--pe-type) 50%, transparent);
+}
+
+.pe-object [data-object-title] {
   padding: 3px 0;
 }
 
-.pe-object-title [data-object-title] {
-  min-width: 4px;
-  overflow-wrap: anywhere;
-}
-
-/* タグは編集欄の隣に置く。 */
+/* 種別は行末のタグで示す。押すと種別のページを開く。 */
 .pe-editor .pe-tag {
+  margin-left: 8px;
   padding: 1px 6px;
   color: var(--pe-type);
   font: inherit;
@@ -249,46 +249,18 @@
   user-select: none;
 }
 
-.pe-editor .pe-tag:hover,
-.pe-editor .pe-tag:focus,
-.pe-editor .pe-tag[aria-expanded="true"] {
+.pe-editor .pe-tag:hover {
   background: color-mix(in srgb, var(--pe-type) 26%, transparent);
 }
 
-.pe-editor .pe-tag:focus,
-.pe-editor .pe-tag[aria-expanded="true"] {
-  outline: 1px solid var(--pe-type);
-  outline-offset: 1px;
-}
-
-.pe-tag-actions:not([hidden]) {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-block-end: 4px;
-}
-
-.pe-editor .pe-tag-actions button {
-  padding: 2px 8px;
-  background: var(--pe-surface);
-  border: 1px solid var(--pe-line);
-  border-radius: 5px;
-  font-size: 12px;
-}
-
-.pe-object[data-done="true"]
-  > .pe-object-content
-  > [data-node-view-content-react]
-  > :first-child
-  [data-object-title] {
+.pe-object[data-done="true"] > .pe-object-content > [data-object-title],
+.pe-object[data-done="true"] > .pe-object-content > div > [data-object-title] {
   color: var(--pe-muted);
   text-decoration: line-through;
 }
 
-.pe-object[data-collapsed="true"]
-  > .pe-object-content
-  > [data-node-view-content-react]
-  > :not(:first-child) {
+/* Fieldと本文は、Titleの文字と同じ左端に揃う。 */
+.pe-object[data-collapsed="true"] [data-object-title] ~ * {
   display: none;
 }
 
