@@ -19,8 +19,8 @@ description: Contextoryリポジトリの機能追加・修正・開発設定変
 1. 現在のブランチ、変更済み・未追跡ファイル、originの最新状態を確認する。安全に取り込める更新は実装前に取り込む。
 2. 既存の未コミット変更を消さない。ユーザーがそれらを今回の対象として承認した場合はcommitで保存して統合する。関係が不明な変更は保持し、今回のcommitへ勝手に混ぜない。
 3. 通常は現在のcheckoutで作業する。ブランチ切替を妨げる他の作業がある場合は、保護したうえで必要に応じてworktreeを使う。別checkoutからpushした場合、元のcheckoutも確認し、ローカルmainが古いままならその状態を明示する。
-4. `packages/ui` はWeb / Desktop共通、`contracts` は入出力契約、`core` は解析・検証、`storage-node` はVault・SQLite、`apps/web` / `apps/desktop` は接続と画面を担当する。既存の共通実装と `docs/architecture.md` を手掛かりに変更する。
-5. 正本Vault、draft、hash競合保護を保持し、動作確認にはfixtureや一時Vaultを使う。利用中のVault・端末設定をテストデータとして書き換えない。
+4. `packages/ui` はWeb / Desktop共通の画面、`editor` はObject文書エディタ、`core` は型・文書の分割と結合・入力検証、`storage-node` はSQLiteの`ObjectStore`、`apps/server` / `apps/web` / `apps/desktop` は接続を担当する。既存の共通実装と `docs/architecture.md` を手掛かりに変更する。
+5. 動作確認には一時フォルダのDB（サーバーは`PKM_SERVER_DATA_DIR`、Electron smokeは一時`userData`）を使う。利用中の`objects.sqlite`・端末設定をテストデータとして書き換えない。
 
 ## 検証と完了
 

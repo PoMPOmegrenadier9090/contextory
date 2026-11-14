@@ -1,0 +1,46 @@
+:root {
+  color-scheme: light dark;
+  font:
+    14px/1.6 -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+}
+body {
+  margin: 0;
+}
+.cn {
+  padding: 20px 24px;
+}
+h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.cn-note,
+.cn-hint,
+.cn-current {
+  margin: 0 0 12px;
+  opacity: 0.75;
+}
+label {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+input {
+  font: inherit;
+  padding: 6px 8px;
+}
+.cn-error {
+  min-height: 1.6em;
+  margin: 0;
+  color: #c0392b;
+}
+.cn-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+button {
+  font: inherit;
+  padding: 6px 12px;
+}

@@ -253,7 +253,7 @@ export const packageMacDesktop = (): void => {
     const storage = pathToFileURL(
       join(appRoot, "node_modules", "@pkm", "storage-node", "dist", "index.js"),
     ).href;
-    const nativeCheck = `const { IndexDatabase } = await import(${JSON.stringify(storage)}); const index = new IndexDatabase(":memory:"); console.log("Packaged Electron SQLite check passed:", process.versions.electron, index.database.prepare("select sqlite_version() as version").get().version); index.close();`;
+    const nativeCheck = `const { ObjectStore } = await import(${JSON.stringify(storage)}); new ObjectStore(":memory:").close(); console.log("Packaged Electron SQLite check passed:", process.versions.electron);`;
     execFileSync(executable, ["--input-type=module", "-e", nativeCheck], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
       stdio: "inherit",

@@ -9,7 +9,6 @@ __pycache__/
 *.tsbuildinfo
 
 # Manual sync checks may contain personal notes and attachments.
-/fixtures/vault-v1-sync-test/
 
 # Vault-local derived and operational data
 .pkm/

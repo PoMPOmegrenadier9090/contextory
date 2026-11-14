@@ -11,7 +11,9 @@ RUN corepack pnpm --filter @pkm/server... --filter @pkm/web... build
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 COPY --from=build /app /app
-ENV NODE_ENV=production PKM_SERVER_HOST=0.0.0.0 PKM_SERVER_PORT=3210 PKM_VAULT_ROOT=/var/syncthing/vault
+ENV NODE_ENV=production PKM_SERVER_HOST=0.0.0.0 PKM_SERVER_PORT=3210 PKM_SERVER_DATA_DIR=/server-data
+# 新しいnamed volumeは、この所有者を引き継ぐ。
+RUN mkdir /server-data && chown node:node /server-data
 USER node
 EXPOSE 3210
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "fetch('http://127.0.0.1:3210/health').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"
