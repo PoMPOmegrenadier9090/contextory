@@ -7,7 +7,7 @@ import type {
 } from "@pkm/core";
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { DesktopApi } from "./desktop-api.js";
+import type { DesktopApi, DesktopConnectionApi } from "./desktop-api.js";
 import { DESKTOP_IPC_CHANNELS } from "./ipc-contract.js";
 
 const invoke = <T>(channel: string, ...args: readonly unknown[]): Promise<T> =>
@@ -56,4 +56,11 @@ const api: DesktopApi = {
     invoke<ObjectOverview>(DESKTOP_IPC_CHANNELS.objectOverview, { from, to }),
 };
 
+const connection: DesktopConnectionApi = {
+  get: () => invoke(DESKTOP_IPC_CHANNELS.connectionGet),
+  save: (input) => invoke(DESKTOP_IPC_CHANNELS.connectionSave, input),
+  clear: () => invoke(DESKTOP_IPC_CHANNELS.connectionClear),
+};
+
 contextBridge.exposeInMainWorld("pkm", api);
+contextBridge.exposeInMainWorld("pkmConnection", connection);

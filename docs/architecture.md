@@ -8,13 +8,13 @@
 
 | 場所                    | 責務                                                                    | 主な入口                                                    |
 | ----------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `packages/core`         | Object・文書・種別の型、文書の分割と結合、入力検証、`ObjectClient`契約  | `object-model.ts`、`object-document.ts`、`object-client.ts` |
+| `packages/core`         | Object・文書・種別の型、文書の分割と結合、入力検証、`ObjectClient`契約とHTTP実装 | `object-model.ts`、`object-document.ts`、`object-http-client.ts` |
 | `packages/storage-node` | SQLiteの`ObjectStore`。Object、文書、種別、Field、言及の索引            | `object-store.ts`                                           |
 | `packages/editor`       | TiptapによるObject文書エディタ。`@`・`#`のメニュー、Field行             | `object-editor.tsx`                                         |
 | `packages/ui`           | WebとDesktopで共有する画面。Daily、Timeline、種別のページ、保存の列     | `object-app.tsx`                                            |
 | `apps/server`           | `ObjectStore`を開き、HTTP APIとWebの静的ファイルを配信する              | `http-api.ts`、`object-api.ts`                              |
-| `apps/web`              | `ObjectClient`のHTTP実装とService Worker                                | `object-client.ts`、`main.tsx`                              |
-| `apps/desktop`          | Electronのmainが`ObjectStore`を開き、preloadとIPCで画面へ渡す           | `electron-main.ts`、`electron-ipc.ts`                       |
+| `apps/web`              | Web画面の起動とService Worker                                           | `main.tsx`、`service-worker.ts`                             |
+| `apps/desktop`          | Electronのmainが保存先（手元の`ObjectStore`かサーバー）を選び、IPCで画面へ渡す | `electron-main.ts`、`electron-ipc.ts`、`server-connection.ts` |
 
 ```mermaid
 flowchart BT
@@ -38,6 +38,8 @@ flowchart BT
 - `objects`・`documents`・`contexts`・`types`・`fields`・`field_values`が正本で、`placements`と`mentions`は本文から作り直せる索引。
 - 画面は一つの文書をProseMirrorの一つの木として編集し、保存時にObjectごとに分けて保存する。読み込み時は再び一つの木へ結合する。
 - SQLiteのファイルを端末間で同期しない。複数の端末から使うときは、一つのサーバーへ接続する。
+- Desktopは、接続設定が無ければ手元の`ObjectStore`を、あればサーバーを使う。どちらもmainプロセスの`ObjectClient`として扱い、IPCの入口は変わらない。サーバーへはmainプロセスから`createHttpObjectClient`で、Cloudflare Accessのservice tokenをヘッダーに付けて送る。rendererにはsecretを渡さない。
+- HTTPのクライアントは、Accessのログイン画面への転送や401・403を認証の失敗として扱う。
 
 ## 保存の流れ
 

@@ -10,8 +10,16 @@ if (root === null) throw new Error("Desktop renderer root is missing");
 if (navigator.platform.startsWith("Mac"))
   document.documentElement.dataset.desktopPlatform = "mac";
 
+const connection = await window.pkmConnection.get();
 createRoot(root).render(
   <StrictMode>
-    <ObjectApp client={window.pkm} />
+    <ObjectApp
+      client={window.pkm}
+      location={
+        connection
+          ? `${new URL(connection.url).host}へ保存`
+          : "このMacのSQLiteへ保存"
+      }
+    />
   </StrictMode>,
 );

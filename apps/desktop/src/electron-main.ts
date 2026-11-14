@@ -1,14 +1,47 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createHttpObjectClient, type ObjectClient } from "@pkm/core";
 import { ObjectStore } from "@pkm/storage-node";
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, Menu, safeStorage, shell } from "electron";
 
 import { registerDesktopIpc } from "./electron-ipc.js";
 import { registerDesktopLifecycle } from "./electron-lifecycle.js";
 import { externalWebUrl } from "./external-link.js";
+import { localObjectClient } from "./local-object-client.js";
+import {
+  accessHeaders,
+  connectionFile,
+  parseServerConnection,
+  type ServerConnection,
+} from "./server-connection.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
+
+const loadPage = async (window: BrowserWindow, page: string) => {
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const external = externalWebUrl(url);
+    if (external !== null)
+      void shell
+        .openExternal(external)
+        .catch((error: unknown) =>
+          console.error("External link could not be opened", error),
+        );
+    return { action: "deny" };
+  });
+  window.webContents.on("will-navigate", (event) => event.preventDefault());
+  const developmentUrl = process.env.PKM_RENDERER_URL;
+  if (developmentUrl === undefined)
+    await window.loadFile(join(currentDirectory, "../dist-renderer", page));
+  else await window.loadURL(new URL(page, developmentUrl).href);
+};
+
+const webPreferences = {
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+  preload: join(currentDirectory, "preload.cjs"),
+};
 
 const createWindow = async (): Promise<BrowserWindow> => {
   const window = new BrowserWindow({
@@ -23,52 +56,113 @@ const createWindow = async (): Promise<BrowserWindow> => {
           trafficLightPosition: { x: 12, y: 14 },
         }
       : {}),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: join(currentDirectory, "preload.cjs"),
-    },
+    webPreferences,
   });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    const external = externalWebUrl(url);
-    if (external !== null)
-      void shell
-        .openExternal(external)
-        .catch((error: unknown) =>
-          console.error("External link could not be opened", error),
-        );
-    return { action: "deny" };
-  });
-  window.webContents.on("will-navigate", (event) => event.preventDefault());
-
-  const developmentUrl = process.env.PKM_RENDERER_URL;
-  if (developmentUrl === undefined) {
-    await window.loadFile(
-      join(currentDirectory, "../dist-renderer/index.html"),
-    );
-  } else {
-    await window.loadURL(developmentUrl);
-  }
+  await loadPage(window, "index.html");
   return window;
 };
 
+let connectionWindow: BrowserWindow | null = null;
+const openConnectionWindow = (): void => {
+  if (connectionWindow !== null) return connectionWindow.focus();
+  connectionWindow = new BrowserWindow({
+    width: 520,
+    height: 540,
+    resizable: false,
+    title: "サーバー接続",
+    webPreferences,
+  });
+  connectionWindow.on("closed", () => {
+    connectionWindow = null;
+  });
+  void loadPage(connectionWindow, "connection.html");
+};
+
 await app.whenReady();
+const smoke = process.env.PKM_ELECTRON_SMOKE === "1";
 const objects = new ObjectStore(
-  process.env.PKM_ELECTRON_SMOKE === "1"
-    ? ":memory:"
-    : join(app.getPath("userData"), "objects.sqlite"),
+  smoke ? ":memory:" : join(app.getPath("userData"), "objects.sqlite"),
 );
+const local = localObjectClient(objects);
+const settings = connectionFile(
+  join(app.getPath("userData"), "server-connection.json"),
+  safeStorage,
+);
+// smokeは利用中の接続設定を読まない。
+let connection = smoke
+  ? null
+  : await settings.load().catch((error: unknown) => {
+      console.error("Server connection could not be read", error);
+      return null;
+    });
+const clientFor = (next: ServerConnection | null): ObjectClient =>
+  next === null
+    ? local
+    : createHttpObjectClient({
+        baseUrl: next.url,
+        headers: accessHeaders(next),
+      });
+let client = clientFor(connection);
+const summary = () =>
+  connection && { url: connection.url, clientId: connection.clientId };
+// 保存先が変わったら、Object画面を新しい保存先で読み直す。
+const switchTo = (next: ServerConnection | null): void => {
+  connection = next;
+  client = clientFor(next);
+  for (const window of BrowserWindow.getAllWindows())
+    if (window !== connectionWindow) window.webContents.reload();
+};
+
 registerDesktopLifecycle(
   createWindow,
   () => {
     objects.close();
     return Promise.resolve();
   },
-  registerDesktopIpc(objects),
+  registerDesktopIpc({
+    client: () => client,
+    connection: {
+      get: summary,
+      async save(input) {
+        const next = parseServerConnection(input, connection);
+        // 届くことと認証が通ることを確かめてから切り替える。
+        await clientFor(next).types();
+        await settings.save(next);
+        switchTo(next);
+        return { url: next.url, clientId: next.clientId };
+      },
+      async clear() {
+        await settings.clear();
+        switchTo(null);
+      },
+    },
+  }),
+);
+Menu.setApplicationMenu(
+  Menu.buildFromTemplate([
+    {
+      role: "appMenu",
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { label: "サーバー接続…", click: openConnectionWindow },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ]),
 );
 const mainWindow = await createWindow();
-if (process.env.PKM_ELECTRON_SMOKE === "1") {
+if (smoke) {
   const result = (await mainWindow.webContents.executeJavaScript(
     `new Promise((resolve) => {
       const inspect = () => ({

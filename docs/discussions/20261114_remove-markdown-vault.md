@@ -29,3 +29,20 @@ MCPとQuick Captureも使えなくなった。どちらも[Phase 3の要件](202
 ## Service Workerのエラー表示
 
 確認時にConsoleへ出ていた「An unknown error occurred when fetching the script.」を調べた。登録とキャッシュを消して読み込み直すと、Service Workerは有効になり、キャッシュも作られた。サーバーのログに4xxは無く、通常の再読み込みではエラーは増えなかった。初回登録のときにだけ出る表示で、動作には影響していないと判断し、コードは変えていない。
+
+## Desktopからサーバーへつなぐ
+
+同じ日に、Desktopからサーバーへつなぐ機能を足した。ユーザーと決めたことは次の2点である。
+
+- 最初は、つながっている間だけ使えればよい。オフラインでの編集は扱わない。
+- TunnelとAccessは残す。アプリ側にログインを持たせてAccessを外すと、hostnameを誰でも開けるようになる。Desktopは、Accessのservice tokenで認証する（案B）。もう一つの案は、Desktopの窓でWeb画面を開いてAccessにログインする方式（案A）だった。
+
+実装は次のとおり。
+
+- HTTPのクライアントを`core`の`object-http-client.ts`へ移し、接続先のURLと、全リクエストに付けるヘッダーを指定できるようにした。Accessのログイン画面への転送（`redirect: "manual"`で受ける）と401・403は、認証の失敗として扱う。通信できないときは「サーバーに接続できません」と出す。
+- Desktopのmainプロセスが保存先を選ぶ。接続設定が無ければ手元の`ObjectStore`、あればサーバーを使う。どちらも`ObjectClient`として扱うので、IPCの入口は変えていない。secretはrendererへ渡さない。
+- 接続設定はメニューの「サーバー接続…」で入れる。保存の前に、サーバーへ届くことと認証が通ることを確かめる。secretは`safeStorage`で暗号化し、`server-connection.json`に保存する。Client IDが同じなら、secretを空のまま保存すると前のsecretを使い続ける。
+- URLは、localhost以外ではhttpsに限る。tokenを平文で送らないためである。
+- Object画面のナビゲーションの下に、いまの保存先（「このMacのSQLiteへ保存」か「ホスト名へ保存」）を出す。
+
+Electronのlifecycle smokeに、Accessの代わりをするHTTPサーバーを使う段階を足した。誤ったsecretでは保存されないこと、正しいsecretで保存先が切り替わること、入力の直後に終了しても同期IPC経由でサーバーへ保存されること、設定ファイルにsecretが平文で残らないことを確かめている。実際のCloudflare Accessを通した接続は、まだ確かめていない。

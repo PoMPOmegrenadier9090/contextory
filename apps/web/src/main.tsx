@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ObjectApp } from "@pkm/ui/object-app";
 
-import { createHttpObjectClient } from "./object-client.js";
+import { createHttpObjectClient } from "@pkm/core";
 import "../../../packages/ui/src/object-app.css";
 import "../../../packages/editor/src/editor.css";
 

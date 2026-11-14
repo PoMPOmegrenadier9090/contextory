@@ -288,8 +288,11 @@ const RETRY_DELAY = 3000;
 
 export const ObjectApp = ({
   client,
+  location = "サーバーのSQLiteへ保存",
 }: {
   readonly client: ObjectClient;
+  /** 保存先の説明。ナビゲーションの下に出す。 */
+  readonly location?: string;
 }): React.JSX.Element => {
   const [loaded, setLoaded] = useState<{
     readonly key: number;
@@ -707,7 +710,7 @@ export const ObjectApp = ({
             <dt>⌫</dt>
             <dd>Title先頭でObjectを解除</dd>
           </dl>
-          <p className="od-nav-note">サーバーのSQLiteへ保存</p>
+          <p className="od-nav-note">{location}</p>
         </nav>
         <main className="od-main">
           {typePage ? (

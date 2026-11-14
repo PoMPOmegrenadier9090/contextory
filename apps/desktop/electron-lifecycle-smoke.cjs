@@ -2,35 +2,119 @@
 // Uses a temporary userData directory and never opens the user's ObjectStore.
 /* global __dirname, __filename */
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
-const { existsSync, mkdtempSync, rmSync } = require("node:fs");
+const { spawn } = require("node:child_process");
+const { existsSync, mkdtempSync, readFileSync, rmSync } = require("node:fs");
+const http = require("node:http");
 const { tmpdir } = require("node:os");
 const path = require("node:path");
 const process = require("node:process");
-const { setTimeout } = require("node:timers");
+const { clearTimeout, setTimeout } = require("node:timers");
 const { pathToFileURL } = require("node:url");
 const electron = require("electron");
 
 if (typeof electron === "string") {
+  const electronPath = electron;
   const root = mkdtempSync(path.join(tmpdir(), "contextory-object-smoke-"));
-  try {
-    for (const phase of ["save", "restart"])
-      execFileSync(electron, [__filename, root, phase], {
+  // Cloudflare Accessの代わり。service tokenが無いリクエストは403で断る。
+  /** @type {Map<string, unknown>} */
+  const pages = new Map();
+  /** @type {{ method: string, url: string, authorized: boolean }[]} */
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      const url = request.url ?? "";
+      const authorized =
+        request.headers["cf-access-client-id"] === "smoke-id" &&
+        request.headers["cf-access-client-secret"] === "smoke-secret";
+      requests.push({ method: request.method ?? "", url, authorized });
+      const send = (
+        /** @type {number} */ status,
+        /** @type {unknown} */ value,
+      ) => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify(value));
+      };
+      if (!authorized) return send(403, { message: "forbidden" });
+      const page = /^\/api\/next\/pages\/([^/?]+)$/.exec(url);
+      if (page && request.method === "PUT") {
+        /** @type {unknown} */
+        const parsed = JSON.parse(body);
+        const saved = {
+          doc: /** @type {{ doc: unknown }} */ (parsed).doc,
+          objects: {},
+        };
+        pages.set(decodeURIComponent(page[1] ?? ""), saved);
+        return send(200, saved);
+      }
+      if (page)
+        return send(
+          200,
+          pages.get(decodeURIComponent(page[1] ?? "")) ?? {
+            doc: { type: "doc", content: [{ type: "paragraph" }] },
+            objects: {},
+          },
+        );
+      if (url.startsWith("/api/next/overview"))
+        return send(200, { navigation: [], recent: [] });
+      return send(200, []);
+    });
+  });
+  const run = (/** @type {string[]} */ args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(electronPath, [__filename, root, ...args], {
         env: {
           ...process.env,
           ELECTRON_RUN_AS_NODE: "",
           PKM_ELECTRON_SMOKE: "0",
-          PKM_DESKTOP_MCP_ENABLED: "0",
           PKM_RENDERER_URL: undefined,
         },
         stdio: "inherit",
-        timeout: 20_000,
       });
-    assert.equal(existsSync(path.join(root, "objects.sqlite")), true);
-    console.log("Electron lifecycle smoke passed: Object IPC and restart");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+      const timer = setTimeout(() => child.kill(), 20_000);
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve(undefined);
+        else reject(new Error(`Electron ${args[0]} exited with ${code}`));
+      });
+    });
+  void (async () => {
+    try {
+      await new Promise((resolve) =>
+        server.listen(0, "127.0.0.1", () => resolve(undefined)),
+      );
+      const address = /** @type {import("node:net").AddressInfo} */ (
+        server.address()
+      );
+      await run(["save"]);
+      await run(["restart"]);
+      assert.equal(existsSync(path.join(root, "objects.sqlite")), true);
+      await run(["remote", `http://127.0.0.1:${address.port}`]);
+      const stored = readFileSync(
+        path.join(root, "server-connection.json"),
+        "utf8",
+      );
+      assert.equal(stored.includes("smoke-secret"), false);
+      assert.ok(requests.some((request) => !request.authorized));
+      const daily = [...pages.entries()].find(([id]) =>
+        id.startsWith("daily:"),
+      );
+      assert.ok(daily, "Daily was not saved to the server");
+      assert.ok(
+        JSON.stringify(daily[1]).includes("サーバーへの終了直前の入力"),
+      );
+      console.log(
+        "Electron lifecycle smoke passed: Object IPC, restart and server connection",
+      );
+    } catch (error) {
+      console.error(error);
+      process.exitCode = 1;
+    } finally {
+      server.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  })();
 } else {
   const { app, BrowserWindow } = electron;
   const root = process.argv[2];
@@ -64,7 +148,35 @@ if (typeof electron === "string") {
       assert.ok(window);
       await waitForObjectApp(window);
 
-      if (phase === "save") {
+      if (phase === "remote") {
+        const url = process.argv[4];
+        /** @type {unknown} */
+        const rejected = await window.webContents.executeJavaScript(
+          `window.pkmConnection.save(${JSON.stringify({ url, clientId: "smoke-id", clientSecret: "wrong" })})
+            .then(() => "saved", (error) => error.message)`,
+        );
+        assert.match(String(rejected), /認証に失敗/);
+        // 保存が通ると画面を読み直すので、結果は待たない。
+        await window.webContents.executeJavaScript(
+          `void window.pkmConnection.save(${JSON.stringify({ url, clientId: "smoke-id", clientSecret: "smoke-secret" })}); true`,
+        );
+        const host = new URL(String(url)).host;
+        const deadline = Date.now() + 10_000;
+        while (
+          !(await window.webContents.executeJavaScript(
+            `document.body.innerText.includes(${JSON.stringify(`${host}へ保存`)})`,
+          ))
+        ) {
+          if (Date.now() > deadline)
+            throw new Error("Server connection was not applied");
+          await pause();
+        }
+        await waitForObjectApp(window);
+        await window.webContents.executeJavaScript(
+          `document.querySelector(".tiptap").focus()`,
+        );
+        await window.webContents.insertText("サーバーへの終了直前の入力");
+      } else if (phase === "save") {
         await window.webContents.executeJavaScript(`(async () => {
           await window.pkm.createObject({
             id: "desktop-smoke",

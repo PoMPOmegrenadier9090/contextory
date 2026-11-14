@@ -5,21 +5,34 @@ import {
   parseObjectPatch,
   parseObjectTypePatch,
   requireRequestString,
+  type ObjectClient,
 } from "@pkm/core";
-import type { ObjectStore } from "@pkm/storage-node";
 import { ipcMain } from "electron";
 
 import { DESKTOP_IPC_CHANNELS } from "./ipc-contract.js";
+import type { ServerConnectionSummary } from "./server-connection.js";
 
-export const registerDesktopIpc = (objects: ObjectStore): (() => void) => {
+export interface DesktopServices {
+  /** いまの保存先。接続設定を変えると差し替わる。 */
+  readonly client: () => ObjectClient;
+  readonly connection: {
+    get(): ServerConnectionSummary | null;
+    save(input: unknown): Promise<ServerConnectionSummary>;
+    clear(): Promise<void>;
+  };
+}
+
+export const registerDesktopIpc = ({
+  client,
+  connection,
+}: DesktopServices): (() => void) => {
   const savePage = (hostId: unknown, request: unknown) =>
-    objects.savePage(
+    client().savePage(
       requireRequestString(hostId, "hostId"),
       parseObjectPageSave(request),
-      Date.now(),
     );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectLoadPage, (_event, hostId) =>
-    objects.loadPage(requireRequestString(hostId, "hostId")),
+    client().loadPage(requireRequestString(hostId, "hostId")),
   );
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.objectSavePage,
@@ -29,14 +42,18 @@ export const registerDesktopIpc = (objects: ObjectStore): (() => void) => {
   ipcMain.on(
     DESKTOP_IPC_CHANNELS.objectSavePageSync,
     (event, hostId, request) => {
-      try {
-        savePage(hostId, request);
-        event.returnValue = null;
-      } catch (error) {
-        console.error("Object page could not be saved on close", error);
-        event.returnValue =
-          error instanceof Error ? error.message : String(error);
-      }
+      void Promise.resolve()
+        .then(() => savePage(hostId, request))
+        .then(
+          () => {
+            event.returnValue = null;
+          },
+          (error: unknown) => {
+            console.error("Object page could not be saved on close", error);
+            event.returnValue =
+              error instanceof Error ? error.message : String(error);
+          },
+        );
     },
   );
   ipcMain.handle(
@@ -48,38 +65,44 @@ export const registerDesktopIpc = (objects: ObjectStore): (() => void) => {
         exclude === null || exclude === undefined
           ? null
           : requireRequestString(exclude, "exclude");
-      return objects.search(query, excluded);
+      return client().searchObjects(query, excluded);
     },
   );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectListType, (_event, type) =>
-    objects.objectsOfType(requireRequestString(type, "type")),
+    client().objectsOfType(requireRequestString(type, "type")),
   );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectCreate, (_event, request) =>
-    objects.createObject(parseObjectCreate(request), Date.now()),
+    client().createObject(parseObjectCreate(request)),
   );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectPatch, (_event, id, request) =>
-    objects.patchObject(
+    client().patchObject(
       requireRequestString(id, "id"),
       parseObjectPatch(request),
-      Date.now(),
     ),
   );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTimeline, (_event, id) =>
-    objects.timeline(requireRequestString(id, "id")),
+    client().timeline(requireRequestString(id, "id")),
   );
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTypes, () => objects.types());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTypes, () => client().types());
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.objectUpdateType,
     (_event, name, request) =>
-      objects.updateType(
+      client().updateType(
         requireRequestString(name, "name"),
         parseObjectTypePatch(request),
       ),
   );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectOverview, (_event, request) => {
     const { from, to } = parseObjectOverviewRange(request);
-    return objects.overview(from, to);
+    return client().overview(from, to);
   });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.connectionGet, () => connection.get());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.connectionSave, (_event, input) =>
+    connection.save(input),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.connectionClear, () =>
+    connection.clear(),
+  );
 
   return () => {
     for (const channel of Object.values(DESKTOP_IPC_CHANNELS)) {

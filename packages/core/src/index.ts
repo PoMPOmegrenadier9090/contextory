@@ -48,3 +48,5 @@ export {
   requireRequestRecord,
   requireRequestString,
 } from "./object-request-validation.js";
+export { createHttpObjectClient } from "./object-http-client.js";
+export type { HttpObjectClientOptions } from "./object-http-client.js";

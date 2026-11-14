@@ -10,4 +10,7 @@ export const DESKTOP_IPC_CHANNELS = {
   objectTypes: "pkm:objects:types",
   objectUpdateType: "pkm:objects:type:update",
   objectOverview: "pkm:objects:overview",
+  connectionGet: "pkm:connection:get",
+  connectionSave: "pkm:connection:save",
+  connectionClear: "pkm:connection:clear",
 } as const;

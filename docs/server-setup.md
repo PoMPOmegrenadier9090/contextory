@@ -8,7 +8,7 @@
 ブラウザー / iPhone → Cloudflare Access → Cloudflare Tunnel → Contextory（objects.sqlite）
 ```
 
-MacアプリのDBとサーバーのDBは別々で、同期しない。
+Macアプリは、Accessのservice tokenを使ってこのサーバーのDBへつなげる（「3. Macアプリからつなぐ」）。つながない間は、Mac内のDBを使う。二つのDBは同期しない。
 
 この構成は、Cloudflareで管理するドメイン、Tunnel、Access applicationを作れることが前提。
 
@@ -59,6 +59,20 @@ docker compose --env-file deploy/.env logs --tail 100 cloudflared
 7. ログイン後にWeb画面を開く。iPhoneではSafariの共有メニューから「ホーム画面に追加」できる。
 
 Tunnelは外向きの接続を使う。Cloudflareへの7844番の接続を許可する。3210番をインターネットへ開ける必要は無い。`deploy/.env`はGitの管理対象外。
+
+## 3. Macアプリからつなぐ
+
+Macアプリは、Cloudflare Accessのservice tokenをリクエストのヘッダー（`CF-Access-Client-Id`と`CF-Access-Client-Secret`）に付けてサーバーへつなぐ。Tunnelはそのまま使い、3210番は外へ開かない。
+
+1. CloudflareのZero Trustで、service tokenを作る。表示されたClient IDとClient Secretを控える。
+2. 「2.」で作ったAccess applicationに、Actionを**Service Auth**にしたpolicyを足し、そのservice tokenを許可する。ActionがAllowのままだと、ログイン画面へ転送されて接続できない。
+3. Macアプリのメニュー「Contextory」→「サーバー接続…」を開き、サーバーのURL（例: `https://pkm.example.com`）、Client ID、Client Secretを入れて「接続して保存」を押す。
+4. 接続と認証を確かめてから保存先が切り替わり、画面が読み直される。ナビゲーションの下の表示が「pkm.example.comへ保存」になる。
+
+- Secretは、macOSのキーチェーンの鍵で暗号化して、アプリのデータフォルダの`server-connection.json`に保存する。
+- 「このMacのDBに戻す」を押すと、接続設定を消してMac内のDBへ戻る。Mac内のDBの内容はそのまま残っている。
+- サーバーにつながらない間は、読み込みも保存もできない。保存に失敗した入力は、画面を開いている間は3秒ごとに送り直す。
+- 端末をなくしたときは、Cloudflareでその端末のservice tokenを削除する。端末ごとに別のtokenを作っておくと、ほかの端末に影響しない。
 
 ## 運用・バックアップ
 
