@@ -32,16 +32,10 @@ if (typeof electron === "string") {
     rmSync(root, { recursive: true, force: true });
   }
 } else {
-  const { app, BrowserWindow, protocol } = electron;
+  const { app, BrowserWindow } = electron;
   const root = process.argv[2];
   const phase = process.argv[3];
   app.setPath("userData", root);
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: "pkm-asset",
-      privileges: { standard: true, secure: true, supportFetchAPI: true },
-    },
-  ]);
   const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
   /** @param {import("electron").BrowserWindow} window */
   const waitForObjectApp = async (window) => {
@@ -87,20 +81,33 @@ if (typeof electron === "string") {
             }]
           });
         })()`);
+        // 保存の待ち時間より前に終了しても、窓を閉じる時に書き切る。
+        await window.webContents.executeJavaScript(
+          `document.querySelector(".tiptap").focus()`,
+        );
+        await window.webContents.insertText("終了直前の入力");
       } else {
         /** @type {unknown} */
         const result = await window.webContents
           .executeJavaScript(`(async () => {
           const object = await window.pkm.loadPage("desktop-smoke");
           const daily = await window.pkm.loadPage("daily:2026-11-11");
+          const pad = (value) => String(value).padStart(2, "0");
+          const now = new Date();
+          const today = await window.pkm.loadPage(
+            "daily:" + now.getFullYear() + "-" + pad(now.getMonth() + 1)
+              + "-" + pad(now.getDate())
+          );
           return {
             title: object.objects["desktop-smoke"].title,
-            text: daily.doc.content[0].content[0].text
+            text: daily.doc.content[0].content[0].text,
+            closing: JSON.stringify(today.doc).includes("終了直前の入力")
           };
         })()`);
         assert.deepEqual(result, {
           title: "Desktop smoke",
           text: "Desktop persisted",
+          closing: true,
         });
       }
 

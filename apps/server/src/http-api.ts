@@ -1,107 +1,42 @@
-import { openMcpHost } from "@pkm/mcp";
-import type { McpHostOptions } from "@pkm/mcp";
-import { join, relative } from "node:path";
-import type { EntityPageQuery, PkmVaultChangeEvent } from "@pkm/contracts";
 import { createHash } from "node:crypto";
+import { relative } from "node:path";
 import { promisify } from "node:util";
-import { gzip, brotliCompress, constants } from "node:zlib";
-import type {
-  PkmEntityDocument,
-  PkmSyncthingConflictDocument,
-  PkmEntitySummary,
-  RemoteEntityDocument,
-  RemoteEntityPage,
-} from "@pkm/contracts";
-import { parseMetadataPatch, requireFileHash } from "@pkm/core";
+import { brotliCompress, constants, gzip } from "node:zlib";
+import fastifyStatic from "@fastify/static";
+import { ObjectStore, ObjectStoreError } from "@pkm/storage-node";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
+
+import { registerObjectRoutes } from "./object-api.js";
+
 const gzipAsync = promisify(gzip);
 const brotliAsync = promisify(brotliCompress);
-const metadata = (entity: PkmEntitySummary): Omit<PkmEntitySummary, "body"> => {
-  const { body: _body, ...rest } = entity;
-  void _body;
-  return rest;
-};
-const remoteDocument = (document: PkmEntityDocument): RemoteEntityDocument => ({
-  entity: metadata(document.entity),
-  content: document.content,
-  fileHash: document.fileHash,
-});
-const remoteConflict = (document: PkmSyncthingConflictDocument) => {
-  const { draft: _draft, ...rest } = document;
-  void _draft;
-  return rest;
-};
-import { parseEntityPageQuery, parseBacklinkPageQuery } from "@pkm/core";
-import fastifyStatic from "@fastify/static";
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
-import {
-  parseTodoQuery,
-  parseToggleTodoRequest,
-  requireRequestRecord as requireRecord,
-  requireRequestString as requireString,
-  parseCreateAssetRequest,
-  parseCreateEntityRequest,
-  parseOrphanAssetDeletion,
-  parseResolveEntityConflictRequest,
-  parseResolveSyncthingConflictRequest,
-  parseSaveEntityRequest,
-  parsePermanentlyDeleteEntityRequest,
-} from "@pkm/core";
-import { registerObjectRoutes } from "./object-api.js";
-import {
-  createLinkPreviewLoader,
-  LocalVaultError,
-  ObjectStore,
-  ObjectStoreError,
-  openLocalVault,
-  type LocalVaultService,
-  type OpenLocalVaultOptions,
-} from "@pkm/storage-node";
 
-const entityIdParam = (params: unknown): string =>
-  requireString(requireRecord(params).entityId, "entityId");
+const statusForError = (error: Error): number => {
+  if (error instanceof TypeError) return 400;
+  if (error instanceof ObjectStoreError)
+    return error.code === "OBJECT_NOT_FOUND" ? 404 : 409;
+  if (
+    "statusCode" in error &&
+    typeof error.statusCode === "number" &&
+    error.statusCode >= 400 &&
+    error.statusCode < 500
+  ) {
+    return error.statusCode;
+  }
+  return 500;
+};
 
-const registerRoutes = (
-  app: FastifyInstance,
-  service: LocalVaultService,
-): void => {
-  const linkPreview = createLinkPreviewLoader();
-  app.get("/api/link-preview", (request) =>
-    linkPreview(requireString(requireRecord(request.query).url, "url")),
-  );
-  const eventStreams = new Set<() => void>();
-  const remotePage = (query: EntityPageQuery): RemoteEntityPage => {
-    const page = service.queryEntities(query);
-    const ids = [
-      ...new Set(
-        page.items
-          .flatMap((e) => [
-            e.areaId,
-            e.projectId,
-            e.taskId,
-            e.resourceId,
-            ...e.topicIds,
-            ...(e.relatedEntityIds ?? []),
-          ])
-          .filter((id): id is string => id !== null),
-      ),
-    ];
-    return {
-      items: page.items.map((entity) => ({
-        ...metadata(entity),
-        ...(query.view === "timeline" ? { preview: entity.body } : {}),
-      })),
-      included: service.entityLabels(ids).map(metadata),
-      nextCursor: page.nextCursor,
-    };
-  };
-  const history: PkmVaultChangeEvent[] = [];
-  const stopHistory = service.subscribeToChanges((event) => {
-    history.push(event);
-    if (history.length > 128) history.shift();
-  });
-  app.addHook("onClose", () => {
-    stopHistory();
-  });
+export interface OpenServerAppOptions {
+  /** Object正本のSQLite。 */
+  readonly objectStorePath: string;
+  readonly logger?: boolean | FastifyBaseLogger;
+  readonly webRoot?: string;
+}
+
+export const openServerApp = async (
+  options: OpenServerAppOptions,
+): Promise<FastifyInstance> => {
+  const app = Fastify({ logger: options.logger ?? false });
   app.addHook("onSend", async (request, reply, payload) => {
     if (
       reply.statusCode >= 300 ||
@@ -162,340 +97,7 @@ const registerRoutes = (
     return payload;
   });
 
-  const health = () => ({
-    status: "ok",
-    vaultId: service.vaultId,
-    accessMode: service.accessMode,
-    cacheVersion: service.cacheVersion,
-    sessionId: service.sessionId,
-    revision: service.revision,
-  });
-  app.get("/health", health);
-  app.get("/api/bootstrap", () => ({
-    health: health(),
-    counts: service.entityCounts(),
-    conflictsCount: service.listSyncthingConflicts().length,
-    page: remotePage({ type: "area" }),
-  }));
-
-  app.get("/api/events", (request, reply) => {
-    reply.hijack();
-    reply.raw.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      "x-accel-buffering": "no",
-    });
-    const query = requireRecord(request.query);
-    const since = Number(
-      typeof request.headers["last-event-id"] === "string"
-        ? request.headers["last-event-id"].split(":").at(-1)
-        : (query.since ?? service.revision),
-    );
-    const session =
-      typeof request.headers["last-event-id"] === "string"
-        ? request.headers["last-event-id"].split(":")[0]
-        : query.sessionId;
-    const reset =
-      session !== service.sessionId ||
-      !Number.isSafeInteger(since) ||
-      since > service.revision ||
-      since < (history[0]?.revision ?? service.revision + 1) - 1;
-    const ready = {
-      sessionId: service.sessionId,
-      revision: service.revision,
-      reset,
-    };
-    reply.raw.write(`event: ready\ndata: ${JSON.stringify(ready)}\n\n`);
-    if (!reset)
-      for (const event of history.filter((e) => e.revision > since))
-        reply.raw.write(
-          `id: ${event.sessionId}:${event.revision}\nevent: vault-change\ndata: ${JSON.stringify(event)}\n\n`,
-        );
-
-    const unsubscribe = service.subscribeToChanges((event) => {
-      if (!reply.raw.destroyed) {
-        reply.raw.write(
-          `id: ${event.sessionId}:${event.revision}\nevent: vault-change\ndata: ${JSON.stringify(event)}\n\n`,
-        );
-      }
-    });
-    const keepAlive = setInterval(() => {
-      if (!reply.raw.destroyed) reply.raw.write(": keepalive\n\n");
-    }, 15_000);
-    keepAlive.unref();
-
-    let closed = false;
-    const cleanup = (): void => {
-      if (closed) return;
-      closed = true;
-      clearInterval(keepAlive);
-      unsubscribe();
-      eventStreams.delete(closeStream);
-    };
-    const closeStream = (): void => {
-      cleanup();
-      if (!reply.raw.destroyed) reply.raw.end();
-    };
-    eventStreams.add(closeStream);
-    reply.raw.once("close", cleanup);
-  });
-
-  app.addHook("onClose", () => {
-    for (const closeStream of [...eventStreams]) closeStream();
-  });
-
-  app.get("/api/entities", (request) =>
-    remotePage(parseEntityPageQuery(request.query)),
-  );
-  app.get("/api/entity-options", (request) =>
-    service
-      .queryEntities({ ...parseEntityPageQuery(request.query), nameOnly: true })
-      .items.map((e) => ({
-        id: e.id,
-        type: e.type,
-        displayName: e.displayName?.slice(0, 160) ?? null,
-      })),
-  );
-  app.get("/api/entity-counts", () => service.entityCounts());
-  app.get("/api/calendar-counts", (request) => {
-    const query = request.query as Record<string, unknown>;
-    return service.calendarCounts(
-      requireString(query.from, "from"),
-      requireString(query.to, "to"),
-    );
-  });
-
-  app.get("/api/quick-open", (request) => {
-    const query = requireRecord(request.query).q;
-    return service.quickOpen(
-      typeof query === "string" ? query : requireString(query, "q"),
-    );
-  });
-
-  app.get("/api/todos", (request) =>
-    service.listTodos(parseTodoQuery(request.query)),
-  );
-  app.put("/api/todos/check", async (request) => {
-    await service.toggleTodo(parseToggleTodoRequest(request.body));
-    return { ok: true };
-  });
-
-  app.get("/api/entities/:entityId", async (request) =>
-    remoteDocument(await service.loadEntity(entityIdParam(request.params))),
-  );
-
-  app.get("/api/entities/:entityId/backlinks", (request) =>
-    service.queryBacklinks(
-      entityIdParam(request.params),
-      parseBacklinkPageQuery(request.query),
-    ),
-  );
-
-  app.post(
-    "/api/assets",
-    { bodyLimit: 15 * 1024 * 1024 },
-    async (request, reply) => {
-      const asset = await service.createAsset(
-        parseCreateAssetRequest(request.body),
-      );
-      return reply.code(201).send(asset);
-    },
-  );
-
-  app.get("/api/assets/*", async (request, reply) => {
-    const path = `assets/${requireString(requireRecord(request.params)["*"], "path")}`;
-    const asset = await service.readAsset(path);
-    const query = requireRecord(request.query);
-    const download = query.download === "1";
-    let fileName: string | undefined;
-    if (download && query.fileName !== undefined) {
-      fileName = requireString(query.fileName, "fileName")
-        .replaceAll("\\", "/")
-        .split("/")
-        .at(-1);
-      if (
-        !fileName ||
-        fileName.length > 255 ||
-        [...fileName].some(
-          (character) =>
-            character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-        )
-      )
-        throw new TypeError("Invalid download file name");
-    }
-    reply.header("content-type", asset.mimeType);
-    reply.header("x-content-type-options", "nosniff");
-    reply.header(
-      "content-disposition",
-      !download && asset.mimeType.startsWith("image/")
-        ? "inline"
-        : fileName
-          ? `attachment; filename*=UTF-8''${encodeURIComponent(fileName).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`
-          : "attachment",
-    );
-    return reply.send(asset.data);
-  });
-
-  app.delete("/api/entities/:entityId", async (request) => {
-    await service.permanentlyDeleteEntity(
-      parsePermanentlyDeleteEntityRequest({
-        ...requireRecord(request.body),
-        entityId: entityIdParam(request.params),
-      }),
-    );
-    return { ok: true };
-  });
-
-  app.get("/api/unresolved-references", () =>
-    service.listUnresolvedReferences(),
-  );
-
-  app.get("/api/orphan-assets", () => service.listOrphanAssets());
-
-  app.post("/api/orphan-assets/delete", async (request) => {
-    const body = requireRecord(request.body);
-    return service.deleteOrphanAssets(parseOrphanAssetDeletion(body.assets));
-  });
-
-  app.get("/api/conflicts", () => service.listSyncthingConflicts());
-
-  app.get("/api/conflicts/detail", async (request) =>
-    remoteConflict(
-      await service.loadSyncthingConflict(
-        requireString(requireRecord(request.query).path, "path"),
-      ),
-    ),
-  );
-
-  app.post("/api/conflicts/resolve", async (request, reply) => {
-    const result = await service.resolveSyncthingConflict(
-      parseResolveSyncthingConflictRequest(request.body),
-    );
-    return reply.code(result.ok ? 200 : 409).send(
-      result.ok
-        ? {
-            ...result,
-            document: result.document ? remoteDocument(result.document) : null,
-          }
-        : {
-            ...result,
-            current: result.current ? remoteConflict(result.current) : null,
-          },
-    );
-  });
-
-  app.post("/api/entities", async (request, reply) => {
-    const document = await service.createEntity(
-      parseCreateEntityRequest(request.body),
-    );
-    return reply.code(201).send(remoteDocument(document));
-  });
-
-  app.put("/api/entities/:entityId", async (request, reply) => {
-    const result = await service.saveEntity(
-      parseSaveEntityRequest({
-        ...requireRecord(request.body),
-        entityId: entityIdParam(request.params),
-      }),
-    );
-    return reply.code(result.ok ? 200 : 409).send(
-      result.ok
-        ? {
-            ...result,
-            entity: metadata(
-              service.entitySummary(entityIdParam(request.params)),
-            ),
-          }
-        : result,
-    );
-  });
-  app.patch("/api/entities/:entityId/metadata", async (request, reply) => {
-    const body = requireRecord(request.body);
-    const result = await service.patchMetadata(
-      entityIdParam(request.params),
-      parseMetadataPatch(body.patch),
-      requireFileHash(body.expectedFileHash),
-    );
-    return reply
-      .code(result.ok ? 200 : 409)
-      .send(
-        result.ok ? { ...result, entity: metadata(result.entity) } : result,
-      );
-  });
-
-  app.patch("/api/entities/:entityId/body", async (request, reply) => {
-    const body = requireRecord(request.body);
-    if (typeof body.body !== "string")
-      throw new TypeError("body must be a string");
-    const result = await service.patchBody(
-      entityIdParam(request.params),
-      body.body,
-      requireFileHash(body.expectedFileHash),
-    );
-    return reply
-      .code(result.ok ? 200 : 409)
-      .send(
-        result.ok ? { ...result, entity: metadata(result.entity) } : result,
-      );
-  });
-
-  app.post(
-    "/api/entities/:entityId/resolve-conflict",
-    async (request, reply) => {
-      requireString(requireRecord(request.body).content, "content");
-      const result = await service.resolveEntityConflict(
-        parseResolveEntityConflictRequest({
-          ...requireRecord(request.body),
-          entityId: entityIdParam(request.params),
-        }),
-      );
-      return reply.code(result.ok ? 200 : 409).send(
-        result.ok
-          ? {
-              ...result,
-              document: result.document
-                ? remoteDocument(result.document)
-                : null,
-            }
-          : result,
-      );
-    },
-  );
-};
-
-const statusForError = (error: Error): number => {
-  if (error instanceof TypeError) return 400;
-  if ("code" in error && error.code === "ENOENT") return 404;
-  if (error instanceof ObjectStoreError)
-    return error.code === "OBJECT_NOT_FOUND" ? 404 : 409;
-  if (error instanceof LocalVaultError) {
-    return error.code === "ENTITY_NOT_FOUND" ||
-      error.code === "CONFLICT_NOT_FOUND"
-      ? 404
-      : 409;
-  }
-  if (
-    "statusCode" in error &&
-    typeof error.statusCode === "number" &&
-    error.statusCode >= 400 &&
-    error.statusCode < 500
-  ) {
-    return error.statusCode;
-  }
-  return 500;
-};
-
-export interface BuildServerAppOptions {
-  readonly logger?: boolean | FastifyBaseLogger;
-}
-
-export const buildServerApp = (
-  service: LocalVaultService,
-  options: BuildServerAppOptions = {},
-): FastifyInstance => {
-  const app = Fastify({ logger: options.logger ?? false });
-  registerRoutes(app, service);
+  app.get("/health", () => ({ status: "ok" }));
   app.setErrorHandler((error, _request, reply) => {
     const normalizedError =
       error instanceof Error ? error : new Error(String(error));
@@ -504,34 +106,12 @@ export const buildServerApp = (
       error: normalizedError.name,
       message:
         statusCode === 500 ? "Internal Server Error" : normalizedError.message,
-      ...(normalizedError instanceof LocalVaultError
-        ? { code: normalizedError.code }
-        : {}),
     });
   });
-  return app;
-};
-
-export interface OpenServerAppOptions extends BuildServerAppOptions {
-  readonly mcp?: McpHostOptions;
-  readonly vault?: OpenLocalVaultOptions;
-  readonly webRoot?: string;
-  /** Object正本のDB。テストで省略した時だけVaultの.pkm配下に置く。 */
-  readonly objectStorePath?: string;
-}
-
-export const openServerApp = async (
-  vaultRoot: string,
-  options: OpenServerAppOptions = {},
-): Promise<FastifyInstance> => {
-  const service = await openLocalVault(vaultRoot, {
-    ...options.vault,
-    localDrafts: false,
+  const objects = new ObjectStore(options.objectStorePath);
+  app.addHook("onClose", () => {
+    objects.close();
   });
-  const app = buildServerApp(service, options);
-  const objects = new ObjectStore(
-    options.objectStorePath ?? join(vaultRoot, ".pkm", "objects.sqlite"),
-  );
   registerObjectRoutes(app, objects);
   const webRoot = options.webRoot;
   if (webRoot !== undefined) {
@@ -550,19 +130,5 @@ export const openServerApp = async (
       },
     });
   }
-  let mcp: Awaited<ReturnType<typeof openMcpHost>> | undefined;
-  try {
-    if (options.mcp) mcp = await openMcpHost(service, options.mcp);
-  } catch (error) {
-    await app.close();
-    await service.close();
-    objects.close();
-    throw error;
-  }
-  app.addHook("onClose", async () => {
-    await mcp?.close();
-    await service.close();
-    objects.close();
-  });
   return app;
 };

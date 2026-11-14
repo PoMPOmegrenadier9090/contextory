@@ -1,20 +1,18 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ObjectPage, ObjectTimelineEntry } from "@pkm/core";
 import { openServerApp } from "./http-api.js";
 
-const FIXTURE_ROOT = fileURLToPath(
-  new URL("../../../fixtures/vault-v1/", import.meta.url),
-);
 const directories: string[] = [];
 const apps: FastifyInstance[] = [];
 
-const open = async (vaultRoot: string): Promise<FastifyInstance> => {
-  const app = await openServerApp(vaultRoot, { vault: { watch: false } });
+const open = async (dataDir: string): Promise<FastifyInstance> => {
+  const app = await openServerApp({
+    objectStorePath: join(dataDir, "objects.sqlite"),
+  });
   apps.push(app);
   return app;
 };
@@ -30,11 +28,8 @@ describe("object API", () => {
   it("persists pages across restarts and serves the timeline from the index", async () => {
     const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
     directories.push(parent);
-    const vaultRoot = join(parent, "vault");
-    await cp(FIXTURE_ROOT, vaultRoot, { recursive: true });
-    await rm(join(vaultRoot, ".pkm"), { recursive: true, force: true });
 
-    const first = await open(vaultRoot);
+    const first = await open(parent);
     const created = await first.inject({
       method: "POST",
       url: "/api/next/objects",
@@ -85,7 +80,7 @@ describe("object API", () => {
     await first.close();
     apps.length = 0;
 
-    const second = await open(vaultRoot);
+    const second = await open(parent);
     const page = (
       await second.inject({ url: "/api/next/pages/project" })
     ).json<ObjectPage>();
@@ -130,10 +125,7 @@ describe("object API", () => {
   it("rejects unknown hosts and invalid input", async () => {
     const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
     directories.push(parent);
-    const vaultRoot = join(parent, "vault");
-    await cp(FIXTURE_ROOT, vaultRoot, { recursive: true });
-    await rm(join(vaultRoot, ".pkm"), { recursive: true, force: true });
-    const app = await open(vaultRoot);
+    const app = await open(parent);
     expect(
       (await app.inject({ url: "/api/next/pages/missing" })).statusCode,
     ).toBe(404);

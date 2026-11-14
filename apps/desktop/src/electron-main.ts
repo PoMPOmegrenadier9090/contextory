@@ -1,53 +1,14 @@
-import { openDesktopMcpHost } from "@pkm/mcp";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  powerMonitor,
-  protocol,
-  shell,
-} from "electron";
+import { ObjectStore } from "@pkm/storage-node";
+import { app, BrowserWindow, shell } from "electron";
 
 import { registerDesktopIpc } from "./electron-ipc.js";
 import { registerDesktopLifecycle } from "./electron-lifecycle.js";
-import { DesktopVaultController } from "./vault-controller.js";
 import { externalWebUrl } from "./external-link.js";
-import { ObjectStore, openLocalVault } from "@pkm/storage-node";
-import { FileVaultPreferences } from "./vault-preferences.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
-const controller = new DesktopVaultController(
-  async () => {
-    const result = await dialog.showOpenDialog({
-      title: "既存Vaultまたは新規Vault用の空フォルダを選択",
-      properties: ["openDirectory", "createDirectory"],
-    });
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  },
-  openLocalVault,
-  {},
-  process.env.PKM_ELECTRON_SMOKE === "1"
-    ? undefined
-    : new FileVaultPreferences(() =>
-        join(app.getPath("userData"), "vault-preferences.json"),
-      ),
-  process.env.PKM_DESKTOP_MCP_ENABLED === "1"
-    ? (service, root) =>
-        openDesktopMcpHost(
-          service,
-          root,
-          join(app.getPath("userData"), "mcp-connection.json"),
-        )
-    : undefined,
-);
-const refreshVault = (): void => {
-  void controller.api.refreshVault().catch((error: unknown) => {
-    console.error("Vault refresh failed", error);
-  });
-};
 
 const createWindow = async (): Promise<BrowserWindow> => {
   const window = new BrowserWindow({
@@ -69,7 +30,6 @@ const createWindow = async (): Promise<BrowserWindow> => {
       preload: join(currentDirectory, "preload.cjs"),
     },
   });
-  window.on("focus", refreshVault);
   window.webContents.setWindowOpenHandler(({ url }) => {
     const external = externalWebUrl(url);
     if (external !== null)
@@ -99,41 +59,13 @@ const objects = new ObjectStore(
     ? ":memory:"
     : join(app.getPath("userData"), "objects.sqlite"),
 );
-const unregisterIpc = registerDesktopIpc(
-  controller,
-  objects,
-  (channel, payload) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed() && !window.webContents.isDestroyed())
-        window.webContents.send(channel, payload);
-    }
-  },
-);
-powerMonitor.on("resume", refreshVault);
-protocol.handle("pkm-asset", async (request) => {
-  const url = new URL(request.url);
-  if (url.hostname !== "vault") return new Response(null, { status: 404 });
-  try {
-    const asset = await controller.api.readAsset(
-      decodeURIComponent(url.pathname.slice(1)),
-    );
-    return new Response(new Uint8Array(asset.data), {
-      headers: {
-        "content-type": asset.mimeType,
-        "x-content-type-options": "nosniff",
-      },
-    });
-  } catch {
-    return new Response(null, { status: 404 });
-  }
-});
 registerDesktopLifecycle(
   createWindow,
-  async () => {
-    await controller.close();
+  () => {
     objects.close();
+    return Promise.resolve();
   },
-  unregisterIpc,
+  registerDesktopIpc(objects),
 );
 const mainWindow = await createWindow();
 if (process.env.PKM_ELECTRON_SMOKE === "1") {
@@ -147,12 +79,7 @@ if (process.env.PKM_ELECTRON_SMOKE === "1") {
         dailyButton: [...document.querySelectorAll('button')]
           .some((button) => button.textContent === 'Daily'),
         methods: [
-          'chooseVault', 'restoreVault', 'syncStatus', 'setupSync', 'listEntities', 'listTodos', 'toggleTodo', 'quickOpen', 'searchEntities', 'createEntity',
-          'createAsset', 'openAsset', 'readImage', 'listUnresolvedReferences',
-          'loadEntity', 'saveDraft', 'saveEntity', 'permanentlyDeleteEntity', 'resolveEntityConflict',
-          'listSyncthingConflicts', 'loadSyncthingConflict',
-          'resolveSyncthingConflict',
-          'onVaultChanged', 'loadPage', 'savePage', 'searchObjects',
+          'loadPage', 'savePage', 'searchObjects',
           'objectsOfType', 'createObject', 'patchObject', 'timeline',
           'types', 'updateType', 'overview'
         ].every((name) => typeof window.pkm?.[name] === 'function')

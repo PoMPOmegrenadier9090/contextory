@@ -2,7 +2,7 @@ import { app, BrowserWindow } from "electron";
 
 export const registerDesktopLifecycle = (
   createWindow: () => Promise<BrowserWindow>,
-  closeVault: () => Promise<void>,
+  closeStore: () => Promise<void>,
   unregisterIpc: () => void,
 ): void => {
   let shutdown: Promise<void> | undefined;
@@ -19,16 +19,16 @@ export const registerDesktopLifecycle = (
     if (process.platform !== "darwin") app.quit();
   });
 
-  // A window can cancel quitting. Keep its Vault and IPC usable until all
+  // A window can cancel quitting. Keep its store and IPC usable until all
   // windows have closed and Electron reaches will-quit.
   app.on("will-quit", (event) => {
     if (readyToQuit) return;
     event.preventDefault();
     if (shutdown !== undefined) return;
     shutdown = Promise.resolve()
-      .then(closeVault)
+      .then(closeStore)
       .catch((error: unknown) => {
-        console.error("Vault could not be closed", error);
+        console.error("Object store could not be closed", error);
       })
       .then(() => {
         readyToQuit = true;

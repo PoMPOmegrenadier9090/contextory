@@ -5,10 +5,22 @@ import {
   type ObjectRecord,
 } from "./object-model.js";
 import type { ObjectTypePatch } from "./object-client.js";
-import {
-  requireRequestRecord,
-  requireRequestString,
-} from "./request-validation.js";
+
+export const requireRequestString = (value: unknown, name: string): string => {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${name} must be a non-empty string`);
+  }
+  return value;
+};
+
+export const requireRequestRecord = (
+  value: unknown,
+): Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("Request body must be an object");
+  }
+  return value as Record<string, unknown>;
+};
 
 const requireType = (value: unknown): ObjectRecord["type"] => {
   const type = normalizeObjectType(value);

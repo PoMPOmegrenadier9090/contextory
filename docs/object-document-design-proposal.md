@@ -251,7 +251,7 @@ Agentには、目的に応じてObject、Relation、Activity、元Blockを問い
 
 BlockとObject ContainerをDBでどのように表すかは未決である。Schema、Property、Relation、Placement、Activityの保存方法も決まっていない。入力体験を小さなPrototypeで検証してから、保存Schemaを決める。
 
-この方向は、Markdown正本とSyncthingを使う現行実装からの変更案である。現行仕様は[現在設計 v3](pkm-current-design-v3.md)を参照する。
+この方向は、Markdown正本とSyncthingを使っていた旧版からの変更案である。旧版の仕様書は削除し、Git履歴に残している。
 
 ## 現在のPrototypeで確認できること
 

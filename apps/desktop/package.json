@@ -5,15 +5,11 @@
   "type": "module",
   "main": "electron-main.cjs",
   "dependencies": {
-    "@mantine/core": "^9.6.2",
-    "@mantine/hooks": "^9.6.2",
-    "@pkm/contracts": "workspace:*",
     "@pkm/core": "workspace:*",
     "@pkm/storage-node": "workspace:*",
     "@pkm/ui": "workspace:*",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "@pkm/mcp": "workspace:*"
+    "react-dom": "^19.3.0"
   },
   "scripts": {
     "build": "tsc -b && vite build && vite build --config vite.preload.config.ts",
@@ -23,13 +19,6 @@
     "smoke:electron-native": "electron electron-native-smoke.cjs",
     "smoke:electron-renderer": "PKM_ELECTRON_SMOKE=1 electron .",
     "smoke:electron-lifecycle": "node electron-lifecycle-smoke.cjs",
-    "smoke:markdown-editor": "electron markdown-editor-smoke.cjs",
-    "smoke:entry-timeline": "electron markdown-editor-smoke.cjs --entry-timeline",
-    "smoke:web-relations": "electron markdown-editor-smoke.cjs --web-relations",
-    "smoke:appearance": "electron markdown-editor-smoke.cjs --appearance",
-    "smoke:commands": "electron markdown-editor-smoke.cjs --commands",
-    "smoke:page-scroll": "electron markdown-editor-smoke.cjs --scroll",
-    "smoke:notifications": "electron markdown-editor-smoke.cjs --notifications",
     "smoke:electron": "corepack pnpm rebuild:electron-native && corepack pnpm smoke:electron-native && corepack pnpm smoke:electron-renderer && corepack pnpm smoke:electron-lifecycle"
   },
   "devDependencies": {

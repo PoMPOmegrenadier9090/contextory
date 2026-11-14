@@ -284,6 +284,7 @@ const TypePage = ({
 
 /** 保存を少し待ってまとめる時間。 */
 const SAVE_DELAY = 400;
+const RETRY_DELAY = 3000;
 
 export const ObjectApp = ({
   client,
@@ -367,7 +368,16 @@ export const ObjectApp = ({
     if (!save) return;
     pending.current = null;
     void enqueue(async () => {
-      const result = await client.savePage(save.hostId, save.doc);
+      const result = await client
+        .savePage(save.hostId, save.doc)
+        .catch((error: unknown) => {
+          // 送れなかった文書は、新しい入力が無ければそのまま送り直す。
+          if (pending.current === null) {
+            pending.current = save;
+            timer.current = window.setTimeout(flush, RETRY_DELAY);
+          }
+          throw error;
+        });
       merge(result.objects);
       await refreshSide(save.hostId);
     });

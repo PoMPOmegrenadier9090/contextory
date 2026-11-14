@@ -5,7 +5,7 @@ export default defineConfig({
   base: "./",
   plugins: [react()],
   resolve: {
-    dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks"],
+    dedupe: ["react", "react-dom"],
   },
   build: {
     outDir: "dist-renderer",
