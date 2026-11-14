@@ -54,6 +54,34 @@ export const TYPE_COLORS = [
   "gray",
 ] as const;
 
+/** Fieldの値での絞り込み。selectは選択肢、dateは"today"・"week"・"past"。 */
+export interface ViewFilter {
+  readonly fieldId: string;
+  readonly value: string;
+}
+
+/** 種別ごとに保存する、Objectの見せ方。 */
+export interface ViewDefinition {
+  readonly id: string;
+  /** type: 種別のページに出す。object: その種別のObjectのページに出す。 */
+  readonly scope: "type" | "object";
+  readonly name: string;
+  readonly layout: "table" | "timeline";
+  /** scopeがobjectのときに絞る種別。nullなら絞らない。 */
+  readonly type: ObjectType | null;
+  /** scopeがobjectのときの範囲。direct: Contextが開いているObject。all: その配下まで。 */
+  readonly reach: "direct" | "all";
+  readonly done: "all" | "open" | "done";
+  readonly filters: readonly ViewFilter[];
+  /** "created"、"updated"、"title"、またはFieldのID */
+  readonly sort: string;
+  readonly desc: boolean;
+  /** 表で隠すFieldのID */
+  readonly hidden: readonly string[];
+  /** 表で、配下のObjectを行の下に入れ子で出す。 */
+  readonly nested: boolean;
+}
+
 export interface TypeDefinition {
   readonly name: ObjectType;
   /** TYPE_COLORSのいずれか。nullなら種別の既定の色。 */
@@ -67,6 +95,7 @@ export interface TypeDefinition {
   readonly extends: ObjectType | null;
   /** 継承元から引き継いだField。自分のFieldの後ろに並ぶ。 */
   readonly inherited: readonly FieldDefinition[];
+  readonly views: readonly ViewDefinition[];
 }
 
 /** Objectは独立した本文を持ち、文書には埋め込みBlockとして置かれる。 */

@@ -11,9 +11,11 @@ import {
   inheritedContexts,
   inlineText,
   joinDocument,
+  newId,
   normalizeObjectType,
   OBJECT_TYPES,
   PAGE_CONFLICT,
+  parseView,
   refIds,
   splitDocument,
   timeFromId,
@@ -25,14 +27,18 @@ import {
   type ObjectFieldContent,
   type ObjectOverview,
   type ObjectPage,
+  type ObjectPatch,
   type ObjectRecord,
   type ObjectSummary,
   type ObjectTimelineEntry,
   type ObjectType,
   type TypeDefinition,
+  type ViewDefinition,
+  type ViewResult,
+  type ViewRow,
 } from "@pkm/core";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 4;
+export const OBJECT_STORE_SCHEMA_VERSION = 5;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
@@ -59,6 +65,7 @@ interface ObjectRow {
   readonly body: string;
   readonly done: number;
   readonly created_at: number;
+  readonly updated_at: number;
 }
 
 interface MentionRow {
@@ -186,6 +193,24 @@ export class ObjectStore {
         this.database.exec("ALTER TABLE fields ADD COLUMN options TEXT");
         this.database.pragma("user_version = 4");
       })();
+    if (version < 5)
+      this.database.transaction(() => {
+        this.database.exec(`
+          CREATE TABLE views (
+            id TEXT PRIMARY KEY,
+            owner TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            config TEXT NOT NULL
+          ) WITHOUT ROWID;
+          CREATE INDEX views_owner ON views(owner);
+        `);
+        for (const name of this.database
+          .prepare("SELECT name FROM types")
+          .pluck()
+          .all() as string[])
+          this.setViews(name, this.defaultViews());
+        this.database.pragma("user_version = 5");
+      })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
   }
 
@@ -296,11 +321,45 @@ export class ObjectStore {
   }
 
   private ensureType(name: ObjectType, now: number): void {
-    this.database
+    const created = this.database
       .prepare(
         "INSERT OR IGNORE INTO types (name, checkbox, created_at) VALUES (?, ?, ?)",
       )
-      .run(name, name === "task" ? 1 : 0, now);
+      .run(name, name === "task" ? 1 : 0, now).changes;
+    if (created) this.setViews(name, this.defaultViews());
+  }
+
+  /** 種別を作ったときに持たせるView。種別のページの表と、ObjectのページのTimeline。 */
+  private defaultViews(): ViewDefinition[] {
+    return [
+      parseView({ id: newId(), scope: "type", name: "すべて" }),
+      parseView({
+        id: newId(),
+        scope: "object",
+        name: "Timeline",
+        layout: "timeline",
+        reach: "all",
+      }),
+    ];
+  }
+
+  private viewsOf(type: ObjectType): ViewDefinition[] {
+    return (
+      this.database
+        .prepare("SELECT config FROM views WHERE owner = ? ORDER BY position")
+        .pluck()
+        .all(type) as string[]
+    ).map((config) => parseView(JSON.parse(config)));
+  }
+
+  private setViews(type: ObjectType, views: readonly ViewDefinition[]): void {
+    this.database.prepare("DELETE FROM views WHERE owner = ?").run(type);
+    const insert = this.database.prepare(
+      "INSERT INTO views (id, owner, position, config) VALUES (?, ?, ?, ?)",
+    );
+    views.forEach((view, position) =>
+      insert.run(view.id, type, position, JSON.stringify(view)),
+    );
   }
 
   /** 種別が自分で持つField。Contextは保存が無くても先頭に持つ。 */
@@ -661,11 +720,7 @@ export class ObjectStore {
     return this.getObject(input.id);
   }
 
-  patchObject(
-    id: string,
-    patch: { readonly title?: string; readonly done?: boolean },
-    now: number,
-  ): ObjectSummary {
+  patchObject(id: string, patch: ObjectPatch, now: number): ObjectSummary {
     this.database.transaction(() => {
       const row = this.requireRow(id);
       this.upsertObject(
@@ -679,6 +734,14 @@ export class ObjectStore {
         nodes(row.body),
         patch.done ?? row.done === 1,
         now,
+      );
+      this.saveFields(
+        id,
+        Object.entries(patch.fields ?? {}).map(([fieldId, value]) => ({
+          id: fieldId,
+          name: "",
+          value,
+        })),
       );
       this.reindex(id, now);
     })();
@@ -722,15 +785,166 @@ export class ObjectStore {
     return rows.map((row) => this.summary(row));
   }
 
-  /** 種別のObjectを新しい順に返す。 */
-  objectsOfType(type: ObjectType): ObjectSummary[] {
-    return (
+  /**
+   * Viewの条件でObjectを集める。anchorIdは開いているObjectで、
+   * todayは日付の条件に使う画面側の今日（YYYY-MM-DD）。
+   */
+  queryView(
+    viewId: string,
+    anchorId: string | null,
+    today: string,
+  ): ViewResult {
+    const stored = this.database
+      .prepare("SELECT owner, config FROM views WHERE id = ?")
+      .get(viewId) as { owner: string; config: string } | undefined;
+    if (!stored)
+      throw new ObjectStoreError(
+        "OBJECT_NOT_FOUND",
+        `View not found: ${viewId}`,
+      );
+    const view = parseView(JSON.parse(stored.config));
+    const type = view.scope === "type" ? stored.owner : view.type;
+    const anchor =
+      view.scope === "object" ? this.requireRow(anchorId ?? "").id : null;
+    const kinds = new Map(
+      type === null ? [] : this.fieldsOf(type).map((f) => [f.id, f.kind]),
+    );
+    const week = new Date(Date.parse(today) + 6 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    type Item = { row: ObjectRow; values: Record<string, readonly DocNode[]> };
+    const item = (row: ObjectRow): Item => ({
+      row,
+      values: Object.fromEntries(
+        (
+          this.database
+            .prepare(
+              "SELECT field_id, value FROM field_values WHERE object_id = ?",
+            )
+            .all(row.id) as { field_id: string; value: string }[]
+        ).map((value) => [value.field_id, nodes(value.value)]),
+      ),
+    });
+    // shortcut: 条件はSQLでなくここで見る。件数が増えて遅くなったらSQLへ移す。
+    const matches = ({ row, values }: Item): boolean =>
+      (type === null || row.type === type) &&
+      (view.done === "all" || (row.done === 1) === (view.done === "done")) &&
+      view.filters.every((filter) => {
+        const kind = kinds.get(filter.fieldId);
+        const text = this.text(values[filter.fieldId] ?? []);
+        // 種別から外したFieldの条件は無視する。
+        if (kind === undefined) return true;
+        if (kind !== "date") return text === filter.value;
+        return filter.value === "today"
+          ? text === today
+          : filter.value === "week"
+            ? text >= today && text <= week
+            : text !== "" && text < today;
+      });
+
+    if (view.layout === "timeline") {
+      const narrowed =
+        type !== null || view.done !== "all" || view.filters.length > 0;
+      const entries: ObjectTimelineEntry[] =
+        anchor === null
+          ? (
+              this.database
+                .prepare("SELECT * FROM objects WHERE type = ?")
+                .all(type) as ObjectRow[]
+            ).map((row) => ({
+              kind: "object",
+              object: this.summary(row),
+              mentioned: false,
+              via: [],
+              time: row.created_at,
+            }))
+          : this.timeline(anchor).filter(
+              (entry) => view.reach === "all" || entry.via.length === 0,
+            );
+      return {
+        rows: [],
+        // 条件で絞ったTimelineには、Objectでない言及を出さない。
+        entries: entries
+          .filter((entry) =>
+            entry.kind === "object"
+              ? matches(item(this.requireRow(entry.object.id)))
+              : !narrowed,
+          )
+          .sort((a, b) => b.time - a.time),
+        objects: {},
+      };
+    }
+
+    const direct = (id: string): ObjectRow[] =>
       this.database
         .prepare(
-          "SELECT * FROM objects WHERE type = ? ORDER BY created_at DESC",
+          `SELECT o.* FROM objects o JOIN contexts c ON c.object_id = o.id
+           WHERE c.target_id = ?`,
         )
-        .all(type) as ObjectRow[]
-    ).map((row) => this.summary(row));
+        .all(id) as ObjectRow[];
+    const key = ({ row, values }: Item): string | number =>
+      view.sort === "created"
+        ? row.created_at
+        : view.sort === "updated"
+          ? row.updated_at
+          : view.sort === "title"
+            ? this.text(nodes(row.title))
+            : this.text(values[view.sort] ?? []);
+    const shown = (rows: readonly ObjectRow[]): Item[] =>
+      rows
+        .map(item)
+        .filter(matches)
+        .sort((a, b) => {
+          const [x, y] = [key(a), key(b)];
+          const order =
+            typeof x === "number"
+              ? x - (y as number)
+              : x.localeCompare(y as string, "ja");
+          return view.desc ? -order : order;
+        });
+    const pool =
+      anchor === null
+        ? (
+            this.database
+              .prepare("SELECT * FROM objects WHERE type = ?")
+              .all(type) as ObjectRow[]
+          ).filter(
+            // 階層では、同じ種別のObjectの配下にあるものを、その下に出す。
+            (row) =>
+              !view.nested ||
+              !this.contextsOf(row.id).some(
+                (id) => this.row(id)?.type === type,
+              ),
+          )
+        : view.nested || view.reach === "direct"
+          ? direct(anchor)
+          : (this.database
+              .prepare(
+                `${REACH} SELECT o.* FROM objects o JOIN reach USING (id) WHERE o.id != ?`,
+              )
+              .all(anchor, anchor) as ObjectRow[]);
+    const rows: ViewRow[] = [];
+    const seen = new Set<string>();
+    const push = (items: readonly Item[], depth: number): void => {
+      for (const { row, values } of items) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        rows.push({ object: this.summary(row), values, depth });
+        // 条件から外れたObjectの配下は辿らない。
+        if (view.nested) push(shown(direct(row.id)), depth + 1);
+      }
+    };
+    push(shown(pool), 0);
+    const objects: Record<string, ObjectSummary> = {};
+    for (const row of rows)
+      for (const id of [
+        ...row.object.contexts,
+        ...Object.values(row.values).flatMap((value) => refIds(value)),
+      ]) {
+        const target = objects[id] ? undefined : this.row(id);
+        if (target) objects[id] = this.summary(target);
+      }
+    return { rows, entries: [], objects };
   }
 
   /* ---------- types ---------- */
@@ -760,6 +974,7 @@ export class ObjectStore {
         fields: this.ownFields(row.name),
         extends: row.extends,
         inherited: this.inheritedFields(row.name),
+        views: this.viewsOf(row.name),
       }));
   }
 
@@ -772,6 +987,7 @@ export class ObjectStore {
       readonly checkbox?: boolean;
       readonly extends?: string | null;
       readonly fields?: readonly FieldDefinition[];
+      readonly views?: readonly ViewDefinition[];
     },
   ): TypeDefinition {
     let current = name;
@@ -864,6 +1080,7 @@ export class ObjectStore {
           ),
         );
       }
+      if (patch.views) this.setViews(name, patch.views.map(parseView));
       if (patch.name !== undefined && patch.name !== name) {
         const next = normalizeObjectType(patch.name);
         if (
@@ -877,8 +1094,16 @@ export class ObjectStore {
           "UPDATE fields SET type = ? WHERE type = ?",
           "UPDATE types SET extends = ? WHERE extends = ?",
           "UPDATE objects SET type = ? WHERE type = ?",
+          "UPDATE views SET owner = ? WHERE owner = ?",
         ])
           this.database.prepare(sql).run(next, name);
+        // ほかの種別のViewが、この種別で絞っていれば付け替える。
+        this.database
+          .prepare(
+            `UPDATE views SET config = json_set(config, '$.type', ?)
+             WHERE json_extract(config, '$.type') = ?`,
+          )
+          .run(next, name);
         current = next;
       }
     })();
@@ -1036,6 +1261,7 @@ export class ObjectStore {
         "field_values",
         "fields",
         "types",
+        "views",
       ])
         this.database.exec(`DELETE FROM ${table}`);
       for (const type of OBJECT_TYPES) this.ensureType(type, 0);

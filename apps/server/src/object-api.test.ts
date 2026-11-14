@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ObjectPage, ObjectTimelineEntry } from "@pkm/core";
+import type { ObjectPage, TypeDefinition, ViewResult } from "@pkm/core";
 import { openServerApp } from "./http-api.js";
 
 const directories: string[] = [];
@@ -103,18 +103,31 @@ describe("object API", () => {
       fields: [{ id: "context" }, { id: "due", name: "期限" }],
     });
     expect(
-      (await second.inject({ url: "/api/next/objects?type=task" })).json(),
-    ).toMatchObject([{ id: "task" }]);
-    expect(
       (
         await second.inject({
           url: "/api/next/overview?from=0&to=1",
         })
       ).json(),
     ).toMatchObject({ recent: [] });
+    const types = (await second.inject({ url: "/api/next/types" })).json<
+      TypeDefinition[]
+    >();
+    const view = (name: string, scope: string): string =>
+      types
+        .find((type) => type.name === name)!
+        .views.find((candidate) => candidate.scope === scope)!.id;
+    const query = async (url: string): Promise<ViewResult> =>
+      (await second.inject({ url })).json<ViewResult>();
+    expect(
+      (
+        await query(`/api/next/views/${view("task", "type")}?today=2026-11-15`)
+      ).rows.map((row) => row.object.id),
+    ).toEqual(["task"]);
     const timeline = (
-      await second.inject({ url: "/api/next/objects/project/timeline" })
-    ).json<ObjectTimelineEntry[]>();
+      await query(
+        `/api/next/views/${view("project", "object")}?today=2026-11-15&anchor=project`,
+      )
+    ).entries;
     expect(
       timeline.map((entry) =>
         entry.kind === "object" ? entry.object.id : entry.text,

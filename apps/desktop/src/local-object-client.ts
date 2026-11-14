@@ -11,11 +11,11 @@ export const localObjectClient = (store: ObjectStore): ObjectClient => {
       run(() => store.savePage(hostId, doc, Date.now(), baseRevision)),
     searchObjects: (query, exclude = null) =>
       run(() => store.search(query, exclude)),
-    objectsOfType: (type) => run(() => store.objectsOfType(type)),
     createObject: (input) => run(() => store.createObject(input, Date.now())),
     patchObject: (id, patch) =>
       run(() => store.patchObject(id, patch, Date.now())),
-    timeline: (id) => run(() => store.timeline(id)),
+    queryView: (viewId, anchorId, today) =>
+      run(() => store.queryView(viewId, anchorId, today)),
     types: () => run(() => store.types()),
     updateType: (name, patch) => run(() => store.updateType(name, patch)),
     overview: (from, to) => run(() => store.overview(from, to)),

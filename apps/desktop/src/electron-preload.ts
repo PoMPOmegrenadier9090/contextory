@@ -2,8 +2,8 @@ import type {
   ObjectOverview,
   ObjectPage,
   ObjectSummary,
-  ObjectTimelineEntry,
   TypeDefinition,
+  ViewResult,
 } from "@pkm/core";
 import { contextBridge, ipcRenderer } from "electron";
 
@@ -38,17 +38,15 @@ const api: DesktopApi = {
       query,
       exclude,
     ),
-  objectsOfType: (type) =>
-    invoke<readonly ObjectSummary[]>(DESKTOP_IPC_CHANNELS.objectListType, type),
   createObject: (input) =>
     invoke<ObjectSummary>(DESKTOP_IPC_CHANNELS.objectCreate, input),
   patchObject: (id, patch) =>
     invoke<ObjectSummary>(DESKTOP_IPC_CHANNELS.objectPatch, id, patch),
-  timeline: (id) =>
-    invoke<readonly ObjectTimelineEntry[]>(
-      DESKTOP_IPC_CHANNELS.objectTimeline,
-      id,
-    ),
+  queryView: (viewId, anchorId, today) =>
+    invoke<ViewResult>(DESKTOP_IPC_CHANNELS.objectQueryView, viewId, {
+      ...(anchorId ? { anchor: anchorId } : {}),
+      today,
+    }),
   types: () =>
     invoke<readonly TypeDefinition[]>(DESKTOP_IPC_CHANNELS.objectTypes),
   updateType: (name, patch) =>

@@ -174,7 +174,7 @@ if (smoke) {
           .some((button) => button.textContent === 'Daily'),
         methods: [
           'loadPage', 'savePage', 'searchObjects',
-          'objectsOfType', 'createObject', 'patchObject', 'timeline',
+          'createObject', 'patchObject', 'queryView',
           'types', 'updateType', 'overview'
         ].every((name) => typeof window.pkm?.[name] === 'function')
       });

@@ -62,7 +62,7 @@ Apple Developer IDによる署名・公証は行っていません。
 
 ## 開発状況
 
-自由文書とObjectの編集、種別とFieldの定義、Timeline、Daily、Quick CaptureをWebとMacアプリで使えます。旧版のMarkdown Vault、Syncthing同期、MCP接続は外しました。MCPは、新しい保存形式の上に作り直す予定です。Quick Captureは画面の中のショートカットだけで、Macのどこからでも呼べるショートカットはまだありません。
+自由文書とObjectの編集、種別とFieldの定義、View（表とTimeline）、Daily、Quick CaptureをWebとMacアプリで使えます。旧版のMarkdown Vault、Syncthing同期、MCP接続は外しました。MCPは、新しい保存形式の上に作り直す予定です。Quick Captureは画面の中のショートカットだけで、Macのどこからでも呼べるショートカットはまだありません。
 
 - [開発・運用ガイド](docs/development.md)
 - [コード構成](docs/architecture.md)

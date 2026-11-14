@@ -5,6 +5,7 @@ import {
   parseObjectPageSave,
   parseObjectPatch,
   parseObjectTypePatch,
+  parseViewQuery,
   requireRequestRecord as requireRecord,
   requireRequestString as requireString,
   type DocNode,
@@ -47,7 +48,6 @@ export const registerObjectRoutes = (
 
   app.get("/api/next/objects", (request) => {
     const query = requireRecord(request.query);
-    if (typeof query.type === "string") return store.objectsOfType(query.type);
     return store.search(
       typeof query.query === "string" ? query.query : "",
       typeof query.exclude === "string" ? query.exclude : null,
@@ -80,9 +80,10 @@ export const registerObjectRoutes = (
       param(request.params, "targetId"),
     ),
   );
-  app.get("/api/next/objects/:id/timeline", (request) =>
-    store.timeline(param(request.params, "id")),
-  );
+  app.get("/api/next/views/:id", (request) => {
+    const { anchorId, today } = parseViewQuery(request.query);
+    return store.queryView(param(request.params, "id"), anchorId, today);
+  });
 
   app.get("/api/next/types", () => store.types());
   app.patch("/api/next/types/:name", (request) =>

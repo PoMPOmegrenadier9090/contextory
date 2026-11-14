@@ -849,3 +849,250 @@ body,
 .od-capture-body .pe-editor .tiptap {
   min-height: 120px;
 }
+
+/* views */
+.od-view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.od-demo .od-view-tabs button,
+.od-demo .od-view-tabs select,
+.od-type-actions button,
+.od-view-settings button {
+  padding: 4px 10px;
+  color: var(--od-muted);
+  font: inherit;
+  font-size: 13px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.od-view-tabs button[aria-pressed="true"] {
+  color: var(--od-ink);
+  font-weight: 600;
+  background: var(--od-subtle);
+  border-color: var(--od-line-strong);
+}
+
+.od-view-tabs .od-view-edit {
+  margin-left: auto;
+}
+
+.od-type-actions button,
+.od-view-settings button {
+  border-color: var(--od-line-strong);
+}
+
+.od-view-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  background: var(--od-subtle);
+  border-radius: 8px;
+}
+
+.od-view-settings label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--od-muted);
+}
+
+.od-view-settings p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
+.od-demo .od-view-settings input:not([type="checkbox"]),
+.od-demo .od-view-settings select,
+.od-demo .od-column-menu input,
+.od-demo .od-column-menu select {
+  padding: 3px 6px;
+  color: var(--od-ink);
+  font: inherit;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 6px;
+}
+
+.od-table-wrap {
+  overflow-x: auto;
+}
+
+.od-table {
+  width: 100%;
+  font-size: 14px;
+  border-collapse: collapse;
+}
+
+.od-table th,
+.od-table td {
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--od-line);
+}
+
+.od-table th {
+  position: relative;
+  color: var(--od-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.od-table summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.od-table summary::-webkit-details-marker {
+  display: none;
+}
+
+.od-column-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  min-width: 160px;
+  padding: 6px;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
+}
+
+.od-demo .od-table button {
+  padding: 2px 4px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.od-demo .od-table button:hover {
+  background: var(--od-subtle);
+}
+
+.od-cell-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.od-cell-title > button {
+  font-weight: 600;
+}
+
+.od-demo .od-table td > input,
+.od-demo .od-table td > select {
+  width: 100%;
+  min-width: 90px;
+  padding: 2px 4px;
+  color: var(--od-ink);
+  font: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.od-demo .od-table td > input:hover,
+.od-demo .od-table td > input:focus,
+.od-demo .od-table td > select:hover,
+.od-demo .od-table td > select:focus {
+  border-color: var(--od-line-strong);
+  outline: none;
+}
+
+.od-cell-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.od-chip {
+  display: inline-flex;
+  font-size: 13px;
+  background: var(--od-subtle);
+  border-radius: 5px;
+}
+
+.od-demo .od-table .od-cell-add {
+  color: var(--od-muted);
+}
+
+.od-picker {
+  position: relative;
+}
+
+.od-demo .od-picker input {
+  width: 140px;
+  padding: 2px 6px;
+  color: var(--od-ink);
+  font: inherit;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 5px;
+}
+
+.od-picker ul {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  min-width: 200px;
+  margin: 2px 0 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
+}
+
+.od-picker ul:empty {
+  display: none;
+}
+
+.od-demo .od-picker li button {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.od-picker small {
+  color: var(--od-muted);
+}
+
+.od-demo .od-table .od-table-new {
+  color: var(--od-ink);
+}
+
+.od-table td:first-child {
+  min-width: 180px;
+}
+
+.od-table .od-cell-refs {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}

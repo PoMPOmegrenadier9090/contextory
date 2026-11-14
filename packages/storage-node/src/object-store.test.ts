@@ -309,7 +309,12 @@ describe("ObjectStore", () => {
       checkbox: true,
       fields: [{ id: "context" }, { id: "place" }],
     });
-    expect(store.objectsOfType("meeting").map((o) => o.id)).toEqual(["mtg"]);
+    // 種別の名前を変えても、Viewはそのまま使える。
+    expect(
+      store
+        .queryView(renamed.views[0]!.id, null, "2026-11-12")
+        .rows.map((row) => [row.object.id, row.values]),
+    ).toEqual([["mtg", { place: [text("3F")] }]]);
     store.updateType("meeting", { fields: [] });
     expect(
       store.loadPage(DAILY).doc.content?.[0]?.content?.map((n) => n.type),
@@ -384,6 +389,117 @@ describe("ObjectStore", () => {
     ]);
     store.updateType("1on1", { fields: [] });
     expect(fieldMentions()).toEqual([]);
+  });
+
+  it("gives each type a table and each object page a timeline by default", () => {
+    const { views } = store.types().find((type) => type.name === "project")!;
+    expect(views).toMatchObject([
+      { scope: "type", layout: "table" },
+      { scope: "object", layout: "timeline", reach: "all" },
+    ]);
+    expect(
+      store
+        .queryView(views[0]!.id, null, "2026-11-12")
+        .rows.map((row) => row.object.id),
+    ).toEqual(["other", "project"]);
+    // ObjectのページのTimelineは、これまでのTimelineと同じ内容になる。
+    expect(
+      store.queryView(views[1]!.id, "project", "2026-11-12").entries,
+    ).toEqual(store.timeline("project"));
+    expect(() => store.queryView(views[1]!.id, null, "2026-11-12")).toThrow(
+      ObjectStoreError,
+    );
+  });
+
+  it("queries a table by reach, type, done and fields, and nests on request", () => {
+    store.updateType("task", {
+      fields: [
+        {
+          id: "state",
+          name: "状態",
+          kind: "select",
+          options: ["未着手", "進行中"],
+        },
+        { id: "due", name: "期限", kind: "date" },
+      ],
+    });
+    store.savePage(
+      "task",
+      doc(block("sub", "task", "子"), block("note", "memo", "メモ")),
+      10,
+    );
+    store.createObject(
+      { id: "t2", type: "task", title: "二つ目", parentId: "project" },
+      11,
+    );
+    store.patchObject(
+      "sub",
+      { fields: { state: [text("進行中")], due: [text("2026-11-10")] } },
+      12,
+    );
+    store.patchObject(
+      "t2",
+      { done: true, fields: { due: [text("2026-11-14")] } },
+      13,
+    );
+    const base = {
+      scope: "object",
+      name: "Task",
+      type: "task",
+      sort: "created",
+      desc: false,
+    };
+    const ids = (view: object): unknown[] => {
+      store.updateType("project", {
+        views: [{ id: "v", ...base, ...view }] as never,
+      });
+      return store
+        .queryView("v", "project", "2026-11-12")
+        .rows.map((row) => [row.object.id, row.depth]);
+    };
+    expect(ids({ reach: "direct" })).toEqual([
+      ["task", 0],
+      ["t2", 0],
+    ]);
+    // 配下のすべてでも、種別の違うMemoは出ない。
+    expect(ids({ reach: "all" })).toEqual([
+      ["task", 0],
+      ["sub", 0],
+      ["t2", 0],
+    ]);
+    expect(
+      ids({ reach: "all", type: null }).map((row) => (row as unknown[])[0]),
+    ).toContain("note");
+    expect(ids({ nested: true })).toEqual([
+      ["task", 0],
+      ["sub", 1],
+      ["t2", 0],
+    ]);
+    expect(ids({ reach: "all", done: "open" })).toEqual([
+      ["task", 0],
+      ["sub", 0],
+    ]);
+    expect(
+      ids({ reach: "all", filters: [{ fieldId: "state", value: "進行中" }] }),
+    ).toEqual([["sub", 0]]);
+    expect(
+      ids({ reach: "all", filters: [{ fieldId: "due", value: "past" }] }),
+    ).toEqual([["sub", 0]]);
+    expect(
+      ids({ reach: "all", filters: [{ fieldId: "due", value: "week" }] }),
+    ).toEqual([["t2", 0]]);
+    expect(ids({ reach: "all", sort: "due", desc: true })).toEqual([
+      ["t2", 0],
+      ["sub", 0],
+      ["task", 0],
+    ]);
+    // Contextも表から書き換えられる。循環になる相手は取り込まない。
+    store.patchObject(
+      "t2",
+      { fields: { context: [ref("task"), ref("t2")] } },
+      14,
+    );
+    expect(store.getObject("t2").contexts).toEqual(["task"]);
   });
 
   it("refuses contexts that would create a cycle and unknown hosts", () => {

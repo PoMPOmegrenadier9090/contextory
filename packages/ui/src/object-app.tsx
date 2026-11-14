@@ -8,7 +8,6 @@ import {
   type ObjectClient,
   type ObjectOverview,
   type ObjectSummary,
-  type ObjectTimelineEntry,
   type ObjectType,
   type ObjectTypePatch,
   type TypeDefinition,
@@ -25,48 +24,22 @@ import {
   localDate,
   shiftDate,
 } from "./object-date.js";
+import { commitOnEnter, KIND_LABEL, ViewTabs } from "./views.js";
 
 const isDaily = (hostId: string): boolean => dailyDate(hostId) !== null;
-const startOfToday = (): number => dateRange(localDate()).from;
 
-const formatTime = (time: number): string =>
-  new Intl.DateTimeFormat(
-    "ja-JP",
-    time >= startOfToday()
-      ? { hour: "2-digit", minute: "2-digit" }
-      : { month: "numeric", day: "numeric" },
-  ).format(time);
-
-type TimelineFilter = "all" | "task" | "memo" | "decision" | "mention";
-const FILTERS: readonly (readonly [TimelineFilter, string])[] = [
-  ["all", "すべて"],
-  ["task", "Task"],
-  ["memo", "Memo"],
-  ["decision", "Decision"],
-  ["mention", "言及"],
-];
-
-const KIND_LABEL = {
-  text: "テキスト",
-  reference: "参照",
-  date: "日付",
-  select: "選択",
-} as const;
-
-/** 種別のページ。名前・色・Fieldを定義する。 */
-const TypePage = ({
+/** 種別の設定。名前・色・Fieldを定義する。 */
+const TypeSettings = ({
   definition,
   others,
-  objects,
   onPatch,
-  row,
+  onBack,
 }: {
   readonly definition: TypeDefinition;
   /** 継承元に選べる種別 */
   readonly others: readonly TypeDefinition[];
-  readonly objects: readonly ObjectSummary[];
   readonly onPatch: (patch: ObjectTypePatch) => void;
-  readonly row: (object: ObjectSummary) => React.JSX.Element;
+  readonly onBack: () => void;
 }): React.JSX.Element => {
   const { fields } = definition;
   const setField = (index: number, patch: Partial<FieldDefinition>): void =>
@@ -80,13 +53,6 @@ const TypePage = ({
     next.splice(to, 0, ...next.splice(index, 1));
     onPatch({ fields: next });
   };
-  // 入力中は確定せず、フォーカスを外した時かEnterで保存する。
-  const commitOnEnter = (
-    event: React.KeyboardEvent<HTMLInputElement>,
-  ): void => {
-    if (event.key === "Enter" && !event.nativeEvent.isComposing)
-      event.currentTarget.blur();
-  };
   return (
     <>
       <header
@@ -94,7 +60,9 @@ const TypePage = ({
         data-type={definition.name}
         data-color={definition.color ?? undefined}
       >
-        <span className="od-type">種別</span>
+        <button type="button" className="od-type" onClick={onBack}>
+          ← Viewへ戻る
+        </button>
         <input
           key={definition.name}
           className="od-page-title"
@@ -269,18 +237,6 @@ const TypePage = ({
           ＋ Fieldを追加
         </button>
       </section>
-      <section className="od-panel">
-        <header>
-          <div>
-            <h2>この種別のObject</h2>
-          </div>
-        </header>
-        {objects.length ? (
-          <ul className="od-rows">{objects.map(row)}</ul>
-        ) : (
-          <p className="od-empty">まだありません。</p>
-        )}
-      </section>
     </>
   );
 };
@@ -319,19 +275,19 @@ export const ObjectApp = ({
   const [objects, setObjects] = useState<
     Readonly<Record<string, ObjectSummary>>
   >({});
-  const [timeline, setTimeline] = useState<readonly ObjectTimelineEntry[]>([]);
   const [overview, setOverview] = useState<ObjectOverview>({
     navigation: [],
     recent: [],
     memos: [],
   });
   const [types, setTypes] = useState<readonly TypeDefinition[]>([]);
-  /** 開いている種別のページと、その種別のObject */
+  /** 開いている種別のページ。settingsなら、Viewではなく種別の設定を出す。 */
   const [typePage, setTypePage] = useState<{
     readonly name: string;
-    readonly objects: readonly ObjectSummary[];
+    readonly settings: boolean;
   } | null>(null);
-  const [filter, setFilter] = useState<TimelineFilter>("all");
+  /** 書き込みが済むたびに増やす。Viewを読み直す合図。 */
+  const [tick, setTick] = useState(0);
   /** "saved"、"saving"、または失敗の理由 */
   const [status, setStatus] = useState("saved");
   // Titleは入力中に保存結果で巻き戻らないよう、画面側の値を正とする。
@@ -374,7 +330,10 @@ export const ObjectApp = ({
     setStatus("saving");
     const run = queue.current.then(task);
     queue.current = run.then(
-      () => setStatus("saved"),
+      () => {
+        setStatus("saved");
+        setTick((last) => last + 1);
+      },
       (error: unknown) =>
         setStatus(
           isPageConflict(error)
@@ -389,14 +348,12 @@ export const ObjectApp = ({
 
   const refreshSide = async (hostId: string): Promise<void> => {
     const range = dateRange(dailyDate(hostId) ?? localDate());
-    const [nextOverview, nextTypes, nextTimeline] = await Promise.all([
+    const [nextOverview, nextTypes] = await Promise.all([
       client.overview(range.from, range.to),
       client.types(),
-      isDaily(hostId) ? Promise.resolve([]) : client.timeline(hostId),
     ]);
     setOverview(nextOverview);
     setTypes(nextTypes);
-    setTimeline(nextTimeline);
     merge(
       Object.fromEntries(
         [...nextOverview.navigation, ...nextOverview.recent].map((o) => [
@@ -469,7 +426,6 @@ export const ObjectApp = ({
       setTitle(own === "無題" ? "" : own);
       setLoaded({ key: ++loads.current, hostId, doc: result.doc });
       setTypePage(null);
-      setFilter("all");
       await refreshSide(hostId);
       window.scrollTo({ top: 0 });
     });
@@ -478,26 +434,56 @@ export const ObjectApp = ({
   const openType = (name: string): void => {
     flush();
     void enqueue(async () => {
-      const [nextTypes, found] = await Promise.all([
-        client.types(),
-        client.objectsOfType(name),
-      ]);
-      setTypes(nextTypes);
+      setTypes(await client.types());
       // 文書は開き直した時に、新しい定義で組み立て直す。
       setLoaded(null);
-      merge(Object.fromEntries(found.map((o) => [o.id, o])));
-      setTypePage({ name, objects: found });
+      setTypePage({ name, settings: false });
       window.scrollTo({ top: 0 });
     });
   };
-  const patchType = (
-    name: string,
-    patch: Parameters<React.ComponentProps<typeof TypePage>["onPatch"]>[0],
-  ): void => {
+
+  /** 開いている文書を、保存されている内容で開き直す。表での変更を本文に映す。 */
+  const pageRef = useRef<string | null>(null);
+  pageRef.current = page;
+  const reload = async (): Promise<void> => {
+    const hostId = pageRef.current;
+    if (hostId === null) return setTypes(await client.types());
+    const result = await client.loadPage(hostId);
+    revision.current = { hostId, value: result.revision };
+    merge(result.objects);
+    setLoaded({ key: ++loads.current, hostId, doc: result.doc });
+    await refreshSide(hostId);
+  };
+  /** Viewからの書き込み。本文に置いたObjectも変わるので、済んだら文書を開き直す。 */
+  const act = (task: () => Promise<unknown>): void => {
+    flush();
     void enqueue(async () => {
-      await client.updateType(name, patch);
+      await task();
+      await reload();
     });
-    openType(patch.name ?? name);
+  };
+  const patchType = (name: string, patch: ObjectTypePatch): void => {
+    // 設定の欄がすぐ変わるよう、返事を待たずに画面へ映す。
+    setTypes((all) =>
+      all.map((definition) =>
+        definition.name === name
+          ? { ...definition, ...patch, name }
+          : definition,
+      ),
+    );
+    flush();
+    void enqueue(async () => {
+      try {
+        const next = await client.updateType(name, patch);
+        setTypePage((last) =>
+          last?.name === name ? { ...last, name: next.name } : last,
+        );
+      } finally {
+        // Viewだけの変更なら、文書は開き直さない。
+        if (Object.keys(patch).some((key) => key !== "views")) await reload();
+        else setTypes(await client.types());
+      }
+    });
   };
 
   useEffect(() => {
@@ -623,71 +609,22 @@ export const ObjectApp = ({
     });
   };
 
+  const typeOf = (type: ObjectType): TypeDefinition | undefined =>
+    types.find((definition) => definition.name === type);
   const hasCheckbox = (type: ObjectType): boolean =>
-    types.find((definition) => definition.name === type)?.checkbox ?? false;
+    typeOf(type)?.checkbox ?? false;
   const colorOf = (type: ObjectType): string | undefined =>
-    types.find((definition) => definition.name === type)?.color ?? undefined;
-  const objectRow = (
-    object: ObjectSummary,
-    note: string,
-  ): React.JSX.Element => (
-    <li
-      className="od-row"
-      data-type={object.type}
-      data-color={colorOf(object.type)}
-      key={object.id}
-    >
-      <span className="od-type">{typeLabel(object.type)}</span>
-      <button type="button" onClick={() => open(object.id)}>
-        <strong>{object.title}</strong>
-        {note ? <small>{note}</small> : null}
-      </button>
-      {hasCheckbox(object.type) ? (
-        <span className="od-row-status" data-done={object.done}>
-          {object.done ? "完了" : "未完了"}
-        </span>
-      ) : null}
-      <time>{formatTime(object.createdAt)}</time>
-    </li>
-  );
-  const viaNote = (via: readonly string[]): string =>
-    via.length ? `via ${via.join(" › ")}` : "";
-  const timelineRow = (entry: ObjectTimelineEntry): React.JSX.Element =>
-    entry.kind === "object" ? (
-      objectRow(
-        entry.object,
-        entry.mentioned
-          ? [entry.field ? `${entry.field}で言及` : "言及", viaNote(entry.via)]
-              .filter(Boolean)
-              .join(" · ")
-          : viaNote(entry.via) || "直接",
-      )
-    ) : (
-      <li
-        className="od-row"
-        data-type="mention"
-        key={`${entry.hostId}-${entry.unitId}`}
-      >
-        <span className="od-type">
-          {entry.unitKind === "section" ? "見出し" : "言及"}
-        </span>
-        <button type="button" onClick={() => open(entry.hostId)}>
-          <strong>{entry.text}</strong>
-          <small>
-            {[entry.hostTitle, viaNote(entry.via)].filter(Boolean).join(" · ")}
-          </small>
-        </button>
-        <time>{formatTime(entry.time)}</time>
-      </li>
-    );
-  const shownTimeline = timeline.filter((entry) =>
-    filter === "all"
-      ? true
-      : filter === "mention"
-        ? entry.kind === "unit" || entry.mentioned
-        : entry.kind === "object" && entry.object.type === filter,
-  );
-
+    typeOf(type)?.color ?? undefined;
+  const viewProps = {
+    client,
+    types,
+    lookup: (id: string) => objects[id],
+    merge,
+    tick,
+    open,
+    act,
+    patchType,
+  };
   // この日のDailyに置いたMemoは本文で読めるので、欄には出さない。
   const dayMemos = overview.memos.filter((memo) => memo.hostId !== page);
   const placeLabel = (hostId: string, hostTitle: string): string => {
@@ -1020,28 +957,52 @@ export const ObjectApp = ({
           <p className="od-nav-note">{location}</p>
         </nav>
         <main className="od-main">
-          {typePage ? (
-            <TypePage
-              definition={
-                types.find(
-                  (definition) => definition.name === typePage.name,
-                ) ?? {
-                  name: typePage.name,
-                  color: null,
-                  builtin: false,
-                  checkbox: false,
-                  fields: [],
-                  extends: null,
-                  inherited: [],
-                }
-              }
+          {typePage && !typeOf(typePage.name) ? (
+            <p className="od-empty">この種別はありません。</p>
+          ) : typePage?.settings ? (
+            <TypeSettings
+              definition={typeOf(typePage.name)!}
               others={types.filter(
                 (definition) => definition.name !== typePage.name,
               )}
-              objects={typePage.objects}
               onPatch={(patch) => patchType(typePage.name, patch)}
-              row={(object) => objectRow(object, "")}
+              onBack={() => setTypePage({ ...typePage, settings: false })}
             />
+          ) : typePage ? (
+            <>
+              <header
+                className="od-page-header"
+                data-type={typePage.name}
+                data-color={colorOf(typePage.name)}
+              >
+                <span className="od-type">種別</span>
+                <h1>#{typeLabel(typePage.name)}</h1>
+                <div className="od-page-meta od-type-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreateType(typePage.name);
+                      setCreating(true);
+                    }}
+                  >
+                    ＋ 作成
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTypePage({ ...typePage, settings: true })}
+                  >
+                    種別の設定
+                  </button>
+                </div>
+              </header>
+              <ViewTabs
+                key={typePage.name}
+                scope="type"
+                owner={typeOf(typePage.name)!}
+                anchorId={null}
+                {...viewProps}
+              />
+            </>
           ) : (
             <>
               {current ? (
@@ -1186,35 +1147,15 @@ export const ObjectApp = ({
               )}
 
               {current ? (
-                <section className="od-panel">
-                  <header>
-                    <div>
-                      <h2>Timeline</h2>
-                      <p>
-                        Contextで属する記録と、@で言及した記述。配下のObjectの分も集める
-                      </p>
-                    </div>
-                    <div className="od-segmented" aria-label="Timeline filter">
-                      {FILTERS.map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          aria-pressed={filter === value}
-                          onClick={() => setFilter(value)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </header>
-                  {shownTimeline.length ? (
-                    <ul className="od-rows">
-                      {shownTimeline.map(timelineRow)}
-                    </ul>
-                  ) : (
-                    <p className="od-empty">まだありません。</p>
-                  )}
-                </section>
+                typeOf(current.type) ? (
+                  <ViewTabs
+                    key={current.id}
+                    scope="object"
+                    owner={typeOf(current.type)!}
+                    anchorId={current.id}
+                    {...viewProps}
+                  />
+                ) : null
               ) : (
                 <section className="od-panel">
                   <header>

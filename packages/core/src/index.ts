@@ -30,6 +30,8 @@ export type {
   FieldDefinition,
   FieldKind,
   TypeDefinition,
+  ViewDefinition,
+  ViewFilter,
   ObjectPage,
   ObjectRecord,
   ObjectSummary,
@@ -40,7 +42,10 @@ export type {
   ObjectClient,
   DayMemo,
   ObjectOverview,
+  ObjectPatch,
   ObjectTypePatch,
+  ViewResult,
+  ViewRow,
 } from "./object-client.js";
 export {
   parseObjectCreate,
@@ -48,6 +53,8 @@ export {
   parseObjectPageSave,
   parseObjectPatch,
   parseObjectTypePatch,
+  parseView,
+  parseViewQuery,
   requireRequestRecord,
   requireRequestString,
 } from "./object-request-validation.js";

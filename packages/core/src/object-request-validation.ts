@@ -3,8 +3,9 @@ import {
   normalizeObjectType,
   type FieldKind,
   type ObjectRecord,
+  type ViewDefinition,
 } from "./object-model.js";
-import type { ObjectTypePatch } from "./object-client.js";
+import type { ObjectPatch, ObjectTypePatch } from "./object-client.js";
 
 export const requireRequestString = (value: unknown, name: string): string => {
   if (typeof value !== "string" || value.length === 0) {
@@ -59,13 +60,72 @@ export const parseObjectCreate = (
   };
 };
 
-export const parseObjectPatch = (
-  value: unknown,
-): { title?: string; done?: boolean } => {
+export const parseObjectPatch = (value: unknown): ObjectPatch => {
   const body = requireRequestRecord(value);
   return {
     ...(typeof body.title === "string" ? { title: body.title } : {}),
     ...(typeof body.done === "boolean" ? { done: body.done } : {}),
+    ...(body.fields === undefined
+      ? {}
+      : {
+          fields: Object.fromEntries(
+            Object.entries(requireRequestRecord(body.fields)).map(
+              ([id, nodes]) => {
+                if (!Array.isArray(nodes))
+                  throw new TypeError("field value must be an array");
+                return [id, nodes as DocNode[]];
+              },
+            ),
+          ),
+        }),
+  };
+};
+
+const oneOf = <T extends string>(value: unknown, options: readonly T[]): T =>
+  options.find((option) => option === value) ?? options[0]!;
+
+/** Viewを読む。欠けた項目は既定にする。保存済みのViewを読むときにも使う。 */
+export const parseView = (value: unknown): ViewDefinition => {
+  const view = requireRequestRecord(value);
+  const list = (items: unknown): unknown[] =>
+    Array.isArray(items) ? (items as unknown[]) : [];
+  return {
+    id: requireRequestString(view.id, "id"),
+    scope: oneOf(view.scope, ["type", "object"]),
+    name:
+      (typeof view.name === "string" ? view.name.trim().slice(0, 40) : "") ||
+      "View",
+    layout: oneOf(view.layout, ["table", "timeline"]),
+    type: normalizeObjectType(view.type),
+    reach: oneOf(view.reach, ["direct", "all"]),
+    done: oneOf(view.done, ["all", "open", "done"]),
+    filters: list(view.filters).flatMap((item) => {
+      const filter = requireRequestRecord(item);
+      return typeof filter.fieldId === "string" &&
+        typeof filter.value === "string" &&
+        filter.value
+        ? [{ fieldId: filter.fieldId, value: filter.value }]
+        : [];
+    }),
+    sort: typeof view.sort === "string" && view.sort ? view.sort : "created",
+    desc: view.desc !== false,
+    hidden: list(view.hidden).filter(
+      (id): id is string => typeof id === "string",
+    ),
+    nested: view.nested === true,
+  };
+};
+
+export const parseViewQuery = (
+  value: unknown,
+): { anchorId: string | null; today: string } => {
+  const query = requireRequestRecord(value);
+  const today = requireRequestString(query.today, "today");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today))
+    throw new TypeError("today must be a date");
+  return {
+    anchorId: typeof query.anchor === "string" ? query.anchor : null,
+    today,
   };
 };
 
@@ -79,6 +139,9 @@ export const parseObjectTypePatch = (value: unknown): ObjectTypePatch => {
     ...(typeof body.checkbox === "boolean" ? { checkbox: body.checkbox } : {}),
     ...(typeof body.extends === "string" || body.extends === null
       ? { extends: body.extends }
+      : {}),
+    ...(Array.isArray(body.views)
+      ? { views: (body.views as unknown[]).map(parseView) }
       : {}),
     ...(Array.isArray(body.fields)
       ? {

@@ -4,6 +4,7 @@ import {
   parseObjectPageSave,
   parseObjectPatch,
   parseObjectTypePatch,
+  parseViewQuery,
   requireRequestString,
   type ObjectClient,
 } from "@pkm/core";
@@ -72,9 +73,6 @@ export const registerDesktopIpc = ({
       return client().searchObjects(query, excluded);
     },
   );
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectListType, (_event, type) =>
-    client().objectsOfType(requireRequestString(type, "type")),
-  );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectCreate, (_event, request) =>
     client().createObject(parseObjectCreate(request)),
   );
@@ -84,8 +82,16 @@ export const registerDesktopIpc = ({
       parseObjectPatch(request),
     ),
   );
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTimeline, (_event, id) =>
-    client().timeline(requireRequestString(id, "id")),
+  ipcMain.handle(
+    DESKTOP_IPC_CHANNELS.objectQueryView,
+    (_event, viewId, request) => {
+      const { anchorId, today } = parseViewQuery(request);
+      return client().queryView(
+        requireRequestString(viewId, "viewId"),
+        anchorId,
+        today,
+      );
+    },
   );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTypes, () => client().types());
   ipcMain.handle(

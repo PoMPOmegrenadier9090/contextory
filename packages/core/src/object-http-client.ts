@@ -1,8 +1,11 @@
-import type { ObjectClient, ObjectOverview } from "./object-client.js";
+import type {
+  ObjectClient,
+  ObjectOverview,
+  ViewResult,
+} from "./object-client.js";
 import type {
   ObjectPage,
   ObjectSummary,
-  ObjectTimelineEntry,
   TypeDefinition,
 } from "./object-model.js";
 
@@ -70,15 +73,13 @@ export const createHttpObjectClient = ({
         "GET",
         `/objects?query=${encode(query)}${exclude ? `&exclude=${encode(exclude)}` : ""}`,
       ),
-    objectsOfType: (type) =>
-      request<readonly ObjectSummary[]>("GET", `/objects?type=${encode(type)}`),
     createObject: (input) => request<ObjectSummary>("POST", "/objects", input),
     patchObject: (id, patch) =>
       request<ObjectSummary>("PATCH", `/objects/${encode(id)}`, patch),
-    timeline: (id) =>
-      request<readonly ObjectTimelineEntry[]>(
+    queryView: (viewId, anchorId, today) =>
+      request<ViewResult>(
         "GET",
-        `/objects/${encode(id)}/timeline`,
+        `/views/${encode(viewId)}?today=${encode(today)}${anchorId ? `&anchor=${encode(anchorId)}` : ""}`,
       ),
     types: () => request<readonly TypeDefinition[]>("GET", "/types"),
     updateType: (name, patch) =>
