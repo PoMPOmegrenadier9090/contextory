@@ -114,7 +114,7 @@ describe("ObjectStore", () => {
     expect(page.objects.new?.contexts).toEqual(["project"]);
   });
 
-  it("keeps contexts on later saves and deletes objects removed from the document", () => {
+  it("keeps contexts on later saves and keeps objects removed from the document", () => {
     const tree = doc(block("new", "task", "a", block("child", "task", "b")));
     store.savePage(DAILY, tree, 10);
     store.addContext("new", "project");
@@ -124,9 +124,23 @@ describe("ObjectStore", () => {
       createdAt: 10,
     });
     store.savePage(DAILY, doc(), 30);
-    expect(() => store.getObject("new")).toThrow(ObjectStoreError);
-    expect(() => store.getObject("child")).toThrow(ObjectStoreError);
-    expect(store.getObject("task").id).toBe("task");
+    expect(store.getObject("new")).toMatchObject({
+      contexts: ["project"],
+      createdAt: 10,
+    });
+    expect(store.getObject("child").title).toBe("b");
+  });
+
+  it("keeps an object moved from the Daily to a project in either save order", () => {
+    store.savePage(DAILY, doc(block("moved", "memo", "メモ")), 10);
+    store.addContext("moved", "area");
+    // 切り取った側の保存が先に走っても、Objectは残る。
+    store.savePage(DAILY, doc(), 11);
+    const page = store.savePage("project", doc(block("moved", "memo", "メモ")), 12);
+    expect(page.objects.moved).toMatchObject({
+      contexts: ["area"],
+      createdAt: 10,
+    });
   });
 
   it("keeps an object that is still placed in another document", () => {
