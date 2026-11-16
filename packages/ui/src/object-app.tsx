@@ -1,4 +1,5 @@
 import {
+  DAILY_UNDATED_ID,
   inheritedContexts,
   isPageConflict,
   newId,
@@ -35,7 +36,8 @@ import {
 } from "./object-date.js";
 import { commitOnEnter, KIND_LABEL, store, stored, ViewTabs } from "./views.js";
 
-const isDaily = (hostId: string): boolean => dailyDate(hostId) !== null;
+const isDaily = (hostId: string): boolean =>
+  hostId === DAILY_UNDATED_ID || dailyDate(hostId) !== null;
 /** 狭い画面では、メニューを本文の上に重ねて出す。 */
 const narrow = (): boolean => window.matchMedia("(max-width: 760px)").matches;
 
@@ -790,6 +792,7 @@ export const ObjectApp = ({
   const dayMemos = overview.memos.filter((memo) => memo.hostId !== page);
   const placeLabel = (hostId: string, hostTitle: string): string => {
     const date = dailyDate(hostId);
+    if (hostId === DAILY_UNDATED_ID) return "日付なしのDaily";
     return date
       ? `${new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric" }).format(new Date(`${date}T12:00:00`))}のDaily`
       : hostTitle;
@@ -797,6 +800,7 @@ export const ObjectApp = ({
   const areas = overview.navigation.filter((o) => o.type === "area");
   const projects = overview.navigation.filter((o) => o.type === "project");
   const selectedDate = page === null ? null : dailyDate(page);
+  const undated = page === DAILY_UNDATED_ID;
   const createOutside = (): void => {
     const id = newId();
     const object: ObjectSummary = {
@@ -1386,6 +1390,7 @@ export const ObjectApp = ({
                     <button
                       type="button"
                       aria-label="前の日"
+                      disabled={undated}
                       onClick={() =>
                         open(
                           dailyHostId(
@@ -1398,13 +1403,17 @@ export const ObjectApp = ({
                     </button>
                     <Popover
                       ariaLabel="Dailyの日付"
-                      label={formatDate(selectedDate ?? localDate())}
+                      label={
+                        undated
+                          ? "日付なし"
+                          : formatDate(selectedDate ?? localDate())
+                      }
                     >
                       {(close) => (
                         <DatePanel
-                          value={selectedDate ?? localDate()}
+                          value={undated ? "" : (selectedDate ?? localDate())}
                           onPick={(date) => {
-                            if (date) open(dailyHostId(date));
+                            open(date ? dailyHostId(date) : DAILY_UNDATED_ID);
                             close();
                           }}
                         />
@@ -1413,6 +1422,7 @@ export const ObjectApp = ({
                     <button
                       type="button"
                       aria-label="次の日"
+                      disabled={undated}
                       onClick={() =>
                         open(
                           dailyHostId(
@@ -1430,13 +1440,15 @@ export const ObjectApp = ({
                     )}
                   </div>
                   <h1>
-                    {new Intl.DateTimeFormat("ja-JP", {
-                      month: "long",
-                      day: "numeric",
-                      weekday: "short",
-                    }).format(
-                      new Date(`${selectedDate ?? localDate()}T12:00:00`),
-                    )}
+                    {undated
+                      ? "日付なし"
+                      : new Intl.DateTimeFormat("ja-JP", {
+                          month: "long",
+                          day: "numeric",
+                          weekday: "short",
+                        }).format(
+                          new Date(`${selectedDate ?? localDate()}T12:00:00`),
+                        )}
                   </h1>
                 </header>
               )}
@@ -1485,7 +1497,7 @@ export const ObjectApp = ({
                     {...viewProps}
                   />
                 ) : null
-              ) : (
+              ) : undated ? null : (
                 <section className="od-panel">
                   <header>
                     <h2>この日のMemo</h2>

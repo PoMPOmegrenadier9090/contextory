@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 /** 端末の時刻での日付（YYYY-MM-DD）。 */
 export const localDate = (date = new Date()): string => {
@@ -24,34 +24,45 @@ export const Popover = ({
   /** 開いているときの、窓を置く位置 */
   const [at, setAt] = useState<React.CSSProperties | null>(null);
   const root = useRef<HTMLSpanElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const closeFromPanel = (): void => {
+    setAt(null);
+    trigger.current?.focus({ preventScroll: true });
+  };
   useEffect(() => {
     if (!at) return;
     const close = (): void => setAt(null);
     const onDown = (event: MouseEvent): void => {
       if (!root.current?.contains(event.target as Node)) close();
     };
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") close();
-    };
     // 窓は画面に固定して置くので、外側がスクロールしたら閉じる。
     const onScroll = (event: Event): void => {
       if (!root.current?.contains(event.target as Node)) close();
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
     };
   }, [at !== null]);
   return (
-    <span className={`od-pop ${className}`} ref={root}>
+    <span
+      className={`od-pop ${className}`}
+      ref={root}
+      onKeyDown={(event) => {
+        if (!at || event.key !== "Escape" || event.nativeEvent.isComposing)
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeFromPanel();
+      }}
+    >
       <button
         type="button"
+        ref={trigger}
         aria-label={ariaLabel}
         aria-expanded={at !== null}
         data-active={active}
@@ -78,7 +89,7 @@ export const Popover = ({
       </button>
       {at ? (
         <div className="od-pop-panel" role="dialog" style={at}>
-          {children(() => setAt(null))}
+          {children(closeFromPanel)}
         </div>
       ) : null}
     </span>
@@ -173,14 +184,42 @@ export const Chooser = ({
     };
   }, [query]);
   const text = query.trim();
-  const create =
-    onCreate && text && !items.some((item) => item.label === text)
-      ? () => onCreate(text)
-      : null;
+  const listId = useId();
+  const options =
+    settled === query
+      ? items.map((item) => ({
+          ...item,
+          pick: () => onPick(item),
+        }))
+      : [];
+  if (
+    settled === query &&
+    onCreate &&
+    text &&
+    !items.some((item) => item.label === text)
+  )
+    options.push({
+      key: "create",
+      label: `「${text}」を使う`,
+      pick: () => onCreate(text),
+    });
+  useEffect(() => {
+    if (settled === query)
+      document
+        .getElementById(`${listId}-${index}`)
+        ?.scrollIntoView({ block: "nearest" });
+  }, [index, listId, query, settled]);
   return (
     <div className="od-chooser">
       <input
         autoFocus
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded="true"
+        aria-controls={listId}
+        aria-activedescendant={
+          options[index] ? `${listId}-${index}` : undefined
+        }
         aria-label={placeholder}
         placeholder={placeholder}
         value={query}
@@ -188,41 +227,33 @@ export const Chooser = ({
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            if (!options.length) return;
             event.preventDefault();
             const step = event.key === "ArrowDown" ? 1 : -1;
-            setIndex((index + step + items.length) % (items.length || 1));
-          }
-          if (event.key === "Enter") {
+            setIndex((index + step + options.length) % options.length);
+          } else if (event.key === "Enter") {
             event.preventDefault();
-            if (settled !== query) return;
-            const item = items[index];
-            if (item) onPick(item);
-            else create?.();
+            options[index]?.pick();
           }
         }}
       />
-      <ul role="listbox">
-        {items.map((item, i) => (
-          <li key={item.key}>
+      <ul role="listbox" id={listId} aria-label={placeholder}>
+        {options.map((item, i) => (
+          <li key={i} role="presentation">
             <button
               type="button"
               role="option"
+              tabIndex={-1}
+              id={`${listId}-${i}`}
               aria-selected={i === index}
               onMouseEnter={() => setIndex(i)}
-              onClick={() => onPick(item)}
+              onClick={item.pick}
             >
               {item.label}
               {item.note ? <small>{item.note}</small> : null}
             </button>
           </li>
         ))}
-        {create ? (
-          <li>
-            <button type="button" onClick={create}>
-              「{text}」を使う
-            </button>
-          </li>
-        ) : null}
       </ul>
     </div>
   );
@@ -248,7 +279,18 @@ export const DatePanel = ({
   readonly value: string;
   readonly onPick: (date: string) => void;
 }): React.JSX.Element => {
-  const [month, setMonth] = useState((value || localDate()).slice(0, 7));
+  const initial = value || localDate();
+  const [month, setMonth] = useState(initial.slice(0, 7));
+  const [activeDay, setActiveDay] = useState(Number(initial.slice(8)));
+  const grid = useRef<HTMLDivElement>(null);
+  const moveFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!moveFocus.current) return;
+    moveFocus.current = false;
+    grid.current
+      ?.querySelector<HTMLButtonElement>('button[tabindex="0"]')
+      ?.focus();
+  }, [activeDay, month]);
   const first = new Date(`${month}-01T12:00:00`);
   const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
   const shift = (step: number): void => {
@@ -264,7 +306,15 @@ export const DatePanel = ({
         placeholder="2026-11-15"
         defaultValue={value}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            grid.current
+              ?.querySelector<HTMLButtonElement>('button[tabindex="0"]')
+              ?.focus();
+            return;
+          }
+          if (event.key !== "Enter") return;
           event.preventDefault();
           const typed = event.currentTarget.value.trim().replaceAll("/", "-");
           const [year, mon, day] = typed.split("-");
@@ -272,7 +322,7 @@ export const DatePanel = ({
           if (!typed) onPick("");
           else if (
             /^\d{4}-\d{2}-\d{2}$/.test(date) &&
-            !Number.isNaN(Date.parse(date))
+            localDate(new Date(`${date}T12:00:00`)) === date
           )
             onPick(date);
         }}
@@ -288,7 +338,12 @@ export const DatePanel = ({
           ›
         </button>
       </header>
-      <div className="od-date-grid">
+      <div
+        className="od-date-grid"
+        ref={grid}
+        role="group"
+        aria-label="カレンダー"
+      >
         {[..."日月火水木金土"].map((day) => (
           <span key={day}>{day}</span>
         ))}
@@ -302,6 +357,37 @@ export const DatePanel = ({
               key={date}
               type="button"
               aria-pressed={date === value}
+              aria-label={formatDate(date)}
+              tabIndex={i + 1 === Math.min(activeDay, days) ? 0 : -1}
+              onFocus={() => setActiveDay(i + 1)}
+              onKeyDown={(event) => {
+                if (
+                  event.altKey ||
+                  event.ctrlKey ||
+                  event.metaKey ||
+                  event.shiftKey
+                )
+                  return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onPick(date);
+                  return;
+                }
+                const step = {
+                  ArrowLeft: -1,
+                  ArrowRight: 1,
+                  ArrowUp: -7,
+                  ArrowDown: 7,
+                }[event.key];
+                if (step === undefined) return;
+                event.preventDefault();
+                const next = new Date(`${date}T12:00:00`);
+                next.setDate(next.getDate() + step);
+                moveFocus.current = true;
+                setMonth(localDate(next).slice(0, 7));
+                setActiveDay(next.getDate());
+              }}
               data-today={date === localDate()}
               onClick={() => onPick(date)}
             >

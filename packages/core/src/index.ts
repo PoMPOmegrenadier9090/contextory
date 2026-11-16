@@ -17,6 +17,7 @@ export type {
 } from "./object-document.js";
 export {
   CONTEXT_FIELD,
+  DAILY_UNDATED_ID,
   FIELD_KINDS,
   inheritedContexts,
   inlineText,

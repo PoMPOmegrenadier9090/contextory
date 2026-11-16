@@ -203,3 +203,5 @@ export const inheritedContexts = (
   parent: Pick<ObjectSummary, "id" | "type" | "contexts"> | undefined,
 ): readonly string[] =>
   !parent ? [] : parent.type === "memo" ? parent.contexts : [parent.id];
+
+export const DAILY_UNDATED_ID = "daily:undated";

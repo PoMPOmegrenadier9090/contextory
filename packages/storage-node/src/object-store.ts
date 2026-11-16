@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import {
   collectMentionUnits,
   CONTEXT_FIELD,
+  DAILY_UNDATED_ID,
   embeddedIds,
   FIELD_KINDS,
   fieldNode,
@@ -43,7 +44,8 @@ import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
 export const OBJECT_STORE_SCHEMA_VERSION = 7;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
-const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
+const isDocumentId = (id: string): boolean =>
+  id === DAILY_UNDATED_ID || /^daily:\d{4}-\d{2}-\d{2}$/.test(id);
 
 export class ObjectStoreError extends Error {
   override readonly name = "ObjectStoreError";
@@ -343,7 +345,7 @@ export class ObjectStore {
   private hostBody(hostId: string): readonly DocNode[] {
     const row = this.row(hostId);
     if (row) return nodes(row.body);
-    if (!DOCUMENT_ID.test(hostId))
+    if (!isDocumentId(hostId))
       throw new ObjectStoreError(
         "OBJECT_NOT_FOUND",
         `Object not found: ${hostId}`,
@@ -1460,7 +1462,11 @@ export class ObjectStore {
       const date = id.slice("daily:".length);
       const path = `daily/${date}.md`;
       const text = toMarkdown(nodes(body), linkFrom(path));
-      if (text) files.push({ path, text: `# ${date}\n\n${text}\n` });
+      if (text)
+        files.push({
+          path,
+          text: `# ${id === DAILY_UNDATED_ID ? "日付なし" : date}\n\n${text}\n`,
+        });
     }
     return files;
   }
@@ -1532,7 +1538,7 @@ export class ObjectStore {
       if (nested) continue;
       const host = hostId === null ? undefined : this.row(hostId);
       // ゴミ箱のObjectの中にあるMemoは、置き場所が無いものとして出す。
-      const placed = host !== undefined || DOCUMENT_ID.test(hostId ?? "");
+      const placed = host !== undefined || isDocumentId(hostId ?? "");
       memos.push({
         object,
         hostId: placed ? hostId : null,
@@ -1604,7 +1610,7 @@ export class ObjectStore {
       );
       const host = this.row(row.host_id);
       // ゴミ箱のObjectの中での言及は出さない。
-      if (!host && !DOCUMENT_ID.test(row.host_id)) continue;
+      if (!host && !isDocumentId(row.host_id)) continue;
       if (row.unit_kind === "object" || row.unit_kind === "field") {
         const field =
           row.unit_kind === "field"
@@ -1669,8 +1675,7 @@ export class ObjectStore {
         "INSERT INTO documents (id, body, updated_at) VALUES (?, ?, ?)",
       );
       for (const [id, body] of Object.entries(workspace.documents)) {
-        if (!DOCUMENT_ID.test(id))
-          throw new TypeError(`Invalid document: ${id}`);
+        if (!isDocumentId(id)) throw new TypeError(`Invalid document: ${id}`);
         insert.run(id, JSON.stringify(body), now);
       }
       // Titleの検索用文字列は参照先に依存するので、全件そろってから作り直す。

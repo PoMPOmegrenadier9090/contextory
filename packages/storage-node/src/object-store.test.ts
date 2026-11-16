@@ -89,6 +89,19 @@ describe("ObjectStore", () => {
   });
   afterEach(() => store.close());
 
+  it("round-trips and exports a Daily document without a date", () => {
+    const doc: DocNode = {
+      type: "doc",
+      content: [paragraph("p", text("Undated body"))],
+    };
+    store.savePage("daily:undated", doc, 1);
+    expect(store.loadPage("daily:undated").doc).toEqual(doc);
+    expect(store.exportMarkdown()).toContainEqual({
+      path: "daily/undated.md",
+      text: "# 日付なし\n\nUndated body\n",
+    });
+  });
+
   it("creates objects from the document with inherited contexts", () => {
     const tree = doc(
       block("new", "task", "新規", block("child", "task", "子")),
