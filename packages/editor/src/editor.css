@@ -201,7 +201,7 @@
 .pe-toggle {
   position: absolute;
   top: calc((var(--pe-row-height) - 22px) / 2);
-  left: -24px;
+  left: -18px;
   display: grid;
   place-items: center;
   width: 22px;
@@ -558,4 +558,77 @@
 
 .pe-input-bar button[aria-pressed="true"] {
   background: var(--pe-subtle, #f8f6f1);
+}
+
+.pe-edit-area {
+  position: relative;
+  padding-inline-start: 24px;
+}
+
+.pe-select-gutter {
+  position: absolute;
+  z-index: 1;
+  inset: 0 auto 0 0;
+  width: 14px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.pe-selection-box,
+.pe-editor[data-drop]::after {
+  position: fixed;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.pe-selection-box {
+  border: 1px solid Highlight;
+  background: color-mix(in srgb, Highlight 13%, transparent);
+}
+
+.pe-editor[data-drop]::after {
+  content: "";
+  left: var(--pe-drop-x);
+  top: var(--pe-drop-y);
+  width: var(--pe-drop-width);
+  height: 2px;
+  background: Highlight;
+}
+
+.pe-editor .tiptap .pe-plain-block {
+  position: relative;
+  padding-inline-start: 27px;
+}
+
+.pe-plain-grip {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 24px;
+  height: 31px;
+}
+
+.pe-plain-block:hover > .pe-grip,
+.pe-block-selected .pe-grip {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .pe-editor .tiptap .pe-plain-block {
+    padding-inline-start: 47px;
+    min-height: 44px;
+  }
+
+  .pe-plain-grip {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.pe-move-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
 }

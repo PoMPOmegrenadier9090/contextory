@@ -172,7 +172,7 @@ if (typeof electron === "string") {
                 type: "bulletList",
                 content: ["One", "Two"].map((label) => ({
                   type: "listItem",
-                  content: [block(label)],
+                  content: [{ type: "paragraph", content: text(label) }],
                 })),
               },
             ],
@@ -194,7 +194,9 @@ if (typeof electron === "string") {
           webContents.executeJavaScript(code);
         const deadline = Date.now() + 5_000;
         while (
-          !(await script('document.querySelectorAll(".pe-grip").length === 4'))
+          !(await script(
+            'document.querySelectorAll(".od-document .pe-grip").length >= 6',
+          ))
         ) {
           if (Date.now() > deadline)
             throw new Error("Block fixture did not render");
@@ -202,17 +204,17 @@ if (typeof electron === "string") {
         }
         const marked = () =>
           script(`[...document.querySelectorAll(".pe-block-selected")]
-            .map((block) => (block.querySelector("[data-object-title]") ?? block).firstChild.textContent)`);
-        const point = async (/** @type {number} */ index) => {
+            .map((block) => block.querySelector("[data-object-title]")?.firstChild?.textContent ?? block.textContent.replaceAll("⠿", ""))`);
+        const point = async (/** @type {number} */ index, list = false) => {
           /** @type {unknown} */
           const result = await script(`(() => {
-            const grip = document.querySelectorAll(".pe-grip")[${index}];
+            const grip = document.querySelectorAll(".od-document ${list ? "li " : ""}.pe-grip")[${index}];
             const rect = grip.getBoundingClientRect();
             return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
           })()`);
           return /** @type {{ x: number, y: number }} */ (result);
         };
-        const [first, last] = await Promise.all([point(0), point(1)]);
+        const [first, last] = await Promise.all([point(0), point(2)]);
         const mouse = (
           /** @type {"mouseDown" | "mouseUp" | "mouseMove"} */ type,
           /** @type {{ x: number, y: number }} */ position,
@@ -254,8 +256,54 @@ if (typeof electron === "string") {
         assert.deepEqual(await marked(), ["First", "Between", "Last"]);
 
         mouse("mouseDown", last);
-        mouse("mouseMove", first);
-        mouse("mouseUp", first);
+        mouse("mouseMove", { ...first, y: first.y - 5 });
+        await pause();
+        assert.equal(
+          await script(
+            'document.querySelector(".pe-editor").hasAttribute("data-drop")',
+          ),
+          true,
+        );
+        mouse("mouseUp", { ...first, y: first.y - 5 });
+        await pause();
+        assert.deepEqual(
+          await script(
+            '[...document.querySelectorAll("[data-object-title]")].map((row) => row.firstChild.textContent)',
+          ),
+          ["Last", "First"],
+        );
+        const moved = await point(0);
+        const afterBetween = await point(2);
+        mouse("mouseDown", moved);
+        mouse("mouseMove", { ...afterBetween, y: afterBetween.y + 6 });
+        mouse("mouseUp", { ...afterBetween, y: afterBetween.y + 6 });
+        await pause();
+        assert.deepEqual(
+          await script(
+            '[...document.querySelectorAll("[data-object-title]")].map((row) => row.firstChild.textContent)',
+          ),
+          ["First", "Last"],
+        );
+        const gutterX = Number(
+          await script(
+            'Math.round(document.querySelector(".od-document .pe-select-gutter").getBoundingClientRect().left + 6)',
+          ),
+        );
+        const [rangeStart, rangeEnd] = await Promise.all([point(0), point(2)]);
+        assert.equal(
+          await script(
+            `document.elementFromPoint(${gutterX}, ${rangeStart.y})?.classList.contains("pe-select-gutter")`,
+          ),
+          true,
+        );
+        mouse("mouseDown", { x: gutterX, y: rangeStart.y });
+        mouse("mouseMove", { x: rangeEnd.x + 60, y: rangeEnd.y });
+        await pause();
+        assert.equal(
+          await script('document.querySelector(".pe-selection-box") !== null'),
+          true,
+        );
+        mouse("mouseUp", { x: rangeEnd.x + 60, y: rangeEnd.y });
         await pause();
         assert.deepEqual(await marked(), ["First", "Between", "Last"]);
         /** @type {unknown} */
@@ -272,21 +320,45 @@ if (typeof electron === "string") {
         await pause();
         assert.deepEqual(await marked(), []);
         assert.equal(
-          await script(`document.querySelector(".tiptap p").textContent`),
+          await script(
+            `document.querySelector(".tiptap p").textContent.replaceAll("⠿", "")`,
+          ),
           "Keep",
         );
         assert.equal(
           await script(`document.querySelectorAll(".pe-object").length`),
-          2,
+          0,
         );
 
+        const listStart = await point(0, true);
+        const listEnd = await point(1, true);
+        mouse("mouseDown", { x: listStart.x + 26, y: listStart.y });
+        mouse("mouseUp", { x: listStart.x + 26, y: listStart.y });
+        await pause();
+        assert.equal(
+          await script("getSelection().anchorNode?.textContent"),
+          "One",
+        );
+        key("Escape");
+        await pause();
+        assert.deepEqual(await marked(), ["One"]);
+        mouse("mouseDown", listEnd);
+        mouse("mouseMove", { ...listStart, y: listStart.y - 5 });
+        mouse("mouseUp", { ...listStart, y: listStart.y - 5 });
+        await pause();
+        assert.deepEqual(
+          await script(
+            '[...document.querySelectorAll(".od-document .tiptap li")].map((row) => row.textContent.replaceAll("⠿", ""))',
+          ),
+          ["Two", "One"],
+        );
         webContents.debugger.attach("1.3");
         await webContents.debugger.sendCommand(
           "Emulation.setTouchEmulationEnabled",
           { enabled: true },
         );
-        const one = await point(0);
-        const two = await point(1);
+        const one = await point(0, true);
+        const two = await point(1, true);
         const touch = (
           /** @type {string} */ type,
           /** @type {{ x: number, y: number }[]} */ touchPoints,
@@ -296,9 +368,10 @@ if (typeof electron === "string") {
             touchPoints,
           });
         await touch("touchStart", [one]);
-        await touch("touchMove", [two]);
         await touch("touchEnd", []);
-        assert.deepEqual(await marked(), ["One", "Two"]);
+        await touch("touchStart", [two]);
+        await touch("touchEnd", []);
+        assert.deepEqual(await marked(), ["Two", "One"]);
         webContents.debugger.detach();
       } else if (phase === "remote") {
         const url = process.argv[4];

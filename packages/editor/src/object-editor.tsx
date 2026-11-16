@@ -55,7 +55,9 @@ import {
 import {
   BlockRangeSelection,
   BlockSelection,
-  extendBlockDrag,
+  grabBlock,
+  moveBlockWithKey,
+  selectFromMargin,
   selectBlock,
 } from "./block-selection.js";
 import { conversionAt } from "./object-conversion.js";
@@ -467,21 +469,23 @@ const ObjectBlockView = ({
         <button
           type="button"
           className="pe-grip"
-          aria-label="ブロックを選択"
-          aria-keyshortcuts="Shift+ArrowUp Shift+ArrowDown"
-          title="ブロックを選択（ドラッグまたは Shift＋↑↓ で範囲を広げる）"
+          aria-label="ブロックを並べ替え"
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          title="ドラッグまたは Alt＋↑↓で並べ替え"
           onPointerDown={(event) => {
             const at = getPos();
-            if (at === undefined || event.button !== 0 || !event.isPrimary)
-              return;
-            event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            selectBlock(editor.view, at, event.shiftKey);
-            if (event.pointerType !== "touch") editor.view.focus();
+            if (at !== undefined)
+              grabBlock(
+                editor.view,
+                event.currentTarget,
+                event.nativeEvent,
+                at,
+              );
           }}
-          onPointerMove={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId))
-              extendBlockDrag(editor.view, event.clientX, event.clientY);
+          onKeyDown={(event) => {
+            const at = getPos();
+            if (at !== undefined)
+              moveBlockWithKey(editor.view, event.nativeEvent, at);
           }}
           onClick={(event) => {
             const at = getPos();
@@ -610,14 +614,6 @@ const ObjectBlock = Node.create({
       return depths;
     };
     return {
-      // Escで、カーソルを包むObjectをブロックごと選ぶ。選べば⌫で消せ、⌘Xで切り取れる。
-      Escape: ({ editor }) => {
-        const { selection } = editor.state;
-        if (selection instanceof NodeSelection) return false;
-        const [depth] = objectDepths(selection.$from);
-        if (depth === undefined) return false;
-        return editor.commands.setNodeSelection(selection.$from.before(depth));
-      },
       // Tanaと同じく、Cmd+↓で開き、Cmd+↑で畳む。Objectの外では既定の動きのまま。
       "Mod-ArrowDown": ({ editor }) => {
         const { $from } = editor.state.selection;
@@ -1182,7 +1178,14 @@ const blockItems = (
   objectAt: number | null,
 ): BlockItem[] => {
   const { selection } = editor.state;
-  if (rangeAt(selection, objectAt ?? pos)) {
+  if (
+    rangeAt(selection, objectAt ?? pos) ||
+    (objectAt === null &&
+      selection instanceof NodeSelection &&
+      selection.node.isBlock &&
+      pos >= selection.from &&
+      pos < selection.to)
+  ) {
     const run = (action: () => boolean): boolean => {
       if (!selection.eq(editor.state.selection)) return false;
       editor.view.focus();
@@ -1609,7 +1612,23 @@ export const ObjectEditor = ({
   return (
     <HostContext.Provider value={host}>
       <BlockMenuContext.Provider value={openBlockMenu}>
-        <EditorContent className="pe-editor" editor={editor} />
+        <div className="pe-edit-area">
+          <div
+            className="pe-select-gutter"
+            aria-hidden="true"
+            title="ドラッグしてブロックを範囲選択"
+            onPointerDown={(event) => {
+              if (editor)
+                selectFromMargin(
+                  editor.view,
+                  event.currentTarget,
+                  event.nativeEvent,
+                );
+            }}
+          />
+          <EditorContent className="pe-editor" editor={editor} />
+          <div className="pe-move-status" role="status" />
+        </div>
       </BlockMenuContext.Provider>
       <InputBar
         editor={editor}
