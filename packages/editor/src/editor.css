@@ -135,8 +135,11 @@
 
 /* object block: 行頭に種別のアイコン、1行目はTitle、開いた時だけFieldと本文を出す */
 .pe-object {
+  --pe-lead-width: 46px;
+  --pe-grip-size: 24px;
+  --pe-row-height: 31px;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: var(--pe-lead-width) minmax(0, 1fr) auto;
   column-gap: 6px;
   align-items: start;
   border-radius: 6px;
@@ -153,10 +156,38 @@
 
 .pe-object-lead {
   position: relative;
-  display: grid;
-  place-items: center;
-  height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: var(--pe-row-height);
   user-select: none;
+}
+
+.pe-grip {
+  flex: 0 0 var(--pe-grip-size);
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--pe-muted);
+  background: none;
+  font-size: 18px;
+  cursor: grab;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  opacity: 0;
+}
+
+.pe-grip:active {
+  cursor: grabbing;
+}
+
+.pe-object:hover > .pe-object-lead > .pe-grip,
+.pe-object[data-selected="true"] > .pe-object-lead > .pe-grip,
+.pe-grip:focus-visible {
+  opacity: 1;
 }
 
 .pe-object-lead input {
@@ -169,7 +200,7 @@
 /* 開閉は左の余白に浮かせ、hover・キーボード操作の時だけ見せる。 */
 .pe-toggle {
   position: absolute;
-  top: 4px;
+  top: calc((var(--pe-row-height) - 22px) / 2);
   left: -24px;
   display: grid;
   place-items: center;
@@ -271,6 +302,12 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--pe-type) 45%, transparent);
 }
 
+.pe-block-selected {
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pe-custom) 12%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pe-custom) 45%, transparent);
+}
+
 .pe-editor .tiptap .ProseMirror-selectednode {
   outline: none;
 }
@@ -278,8 +315,25 @@
 @media (hover: none) {
   .pe-toggle,
   .pe-open,
-  .pe-more {
+  .pe-more,
+  .pe-grip {
     opacity: 1;
+  }
+}
+
+@media (pointer: coarse) {
+  .pe-object {
+    --pe-lead-width: 65px;
+    --pe-grip-size: 44px;
+    --pe-row-height: 44px;
+    grid-template-columns: var(--pe-lead-width) minmax(0, 1fr) fit-content(45%);
+  }
+
+  .pe-object
+    > .pe-object-content
+    > [data-node-view-content-react]
+    > [data-object-title] {
+    padding-block: 9px;
   }
 }
 
@@ -386,8 +440,12 @@
   display: inline-flex;
   gap: 2px;
   align-items: center;
-  height: 31px;
+  height: var(--pe-row-height);
   user-select: none;
+}
+
+.pe-object-side :is(.pe-open, .pe-more) {
+  flex: 0 0 24px;
 }
 
 .pe-context {

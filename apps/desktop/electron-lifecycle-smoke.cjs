@@ -87,6 +87,7 @@ if (typeof electron === "string") {
       const address = /** @type {import("node:net").AddressInfo} */ (
         server.address()
       );
+      await run(["blocks"]);
       await run(["save"]);
       await run(["restart"]);
       assert.equal(existsSync(path.join(root, "objects.sqlite")), true);
@@ -119,7 +120,8 @@ if (typeof electron === "string") {
   const { app, BrowserWindow } = electron;
   const root = process.argv[2];
   const phase = process.argv[3];
-  app.setPath("userData", root);
+  const userData = phase === "blocks" ? path.join(root, "blocks") : root;
+  app.setPath("userData", userData);
   const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
   /** @param {import("electron").BrowserWindow} window */
   const waitForObjectApp = async (window) => {
@@ -141,6 +143,44 @@ if (typeof electron === "string") {
   app
     .whenReady()
     .then(async () => {
+      if (phase === "blocks") {
+        const { ObjectStore } = await import("@pkm/storage-node");
+        const store = new ObjectStore(path.join(userData, "objects.sqlite"));
+        const today = new Date();
+        const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
+        const key = `daily:${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+        const text = (/** @type {string} */ text) => [{ type: "text", text }];
+        const block = (/** @type {string} */ label) => ({
+          type: "objectBlock",
+          attrs: {
+            id: "block-" + label,
+            objectId: "object-" + label,
+            type: "task",
+          },
+          content: [{ type: "objectTitle", content: text(label) }],
+        });
+        store.savePage(
+          key,
+          {
+            type: "doc",
+            content: [
+              block("First"),
+              { type: "paragraph", content: text("Between") },
+              block("Last"),
+              { type: "paragraph", content: text("Keep") },
+              {
+                type: "bulletList",
+                content: ["One", "Two"].map((label) => ({
+                  type: "listItem",
+                  content: [block(label)],
+                })),
+              },
+            ],
+          },
+          Date.now(),
+        );
+        store.close();
+      }
       await import(
         pathToFileURL(path.join(__dirname, "dist/electron-main.js")).href
       );
@@ -148,7 +188,119 @@ if (typeof electron === "string") {
       assert.ok(window);
       await waitForObjectApp(window);
 
-      if (phase === "remote") {
+      if (phase === "blocks") {
+        const { webContents } = window;
+        const script = (/** @type {string} */ code) =>
+          webContents.executeJavaScript(code);
+        const deadline = Date.now() + 5_000;
+        while (
+          !(await script('document.querySelectorAll(".pe-grip").length === 4'))
+        ) {
+          if (Date.now() > deadline)
+            throw new Error("Block fixture did not render");
+          await pause();
+        }
+        const marked = () =>
+          script(`[...document.querySelectorAll(".pe-block-selected")]
+            .map((block) => (block.querySelector("[data-object-title]") ?? block).firstChild.textContent)`);
+        const point = async (/** @type {number} */ index) => {
+          /** @type {unknown} */
+          const result = await script(`(() => {
+            const grip = document.querySelectorAll(".pe-grip")[${index}];
+            const rect = grip.getBoundingClientRect();
+            return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+          })()`);
+          return /** @type {{ x: number, y: number }} */ (result);
+        };
+        const [first, last] = await Promise.all([point(0), point(1)]);
+        const mouse = (
+          /** @type {"mouseDown" | "mouseUp" | "mouseMove"} */ type,
+          /** @type {{ x: number, y: number }} */ position,
+          /** @type {boolean} */ shift = false,
+        ) =>
+          webContents.sendInputEvent({
+            type,
+            ...position,
+            button: "left",
+            clickCount: 1,
+            modifiers:
+              type === "mouseMove"
+                ? ["leftbuttondown"]
+                : shift
+                  ? ["shift"]
+                  : [],
+          });
+        const key = (
+          /** @type {string} */ keyCode,
+          /** @type {boolean} */ shift = false,
+        ) =>
+          webContents.sendInputEvent({
+            type: "keyDown",
+            keyCode,
+            modifiers: shift ? ["shift"] : [],
+          });
+        mouse("mouseDown", first);
+        mouse("mouseUp", first);
+        key("Down", true);
+        key("Down", true);
+        await pause();
+        assert.deepEqual(await marked(), ["First", "Between", "Last"]);
+        key("Up", true);
+        await pause();
+        assert.deepEqual(await marked(), ["First", "Between"]);
+        mouse("mouseDown", last, true);
+        mouse("mouseUp", last, true);
+        await pause();
+        assert.deepEqual(await marked(), ["First", "Between", "Last"]);
+
+        mouse("mouseDown", last);
+        mouse("mouseMove", first);
+        mouse("mouseUp", first);
+        await pause();
+        assert.deepEqual(await marked(), ["First", "Between", "Last"]);
+        /** @type {unknown} */
+        const copied = await script(`(() => {
+          const clipboardData = new DataTransfer();
+          document.querySelector(".tiptap").dispatchEvent(new ClipboardEvent("copy", {
+            bubbles: true, cancelable: true, clipboardData,
+          }));
+          return clipboardData.getData("text/html");
+        })()`);
+        assert.match(String(copied), /First.*Between.*Last/s);
+        assert.doesNotMatch(String(copied), /Keep/);
+        key("Backspace");
+        await pause();
+        assert.deepEqual(await marked(), []);
+        assert.equal(
+          await script(`document.querySelector(".tiptap p").textContent`),
+          "Keep",
+        );
+        assert.equal(
+          await script(`document.querySelectorAll(".pe-object").length`),
+          2,
+        );
+
+        webContents.debugger.attach("1.3");
+        await webContents.debugger.sendCommand(
+          "Emulation.setTouchEmulationEnabled",
+          { enabled: true },
+        );
+        const one = await point(0);
+        const two = await point(1);
+        const touch = (
+          /** @type {string} */ type,
+          /** @type {{ x: number, y: number }[]} */ touchPoints,
+        ) =>
+          webContents.debugger.sendCommand("Input.dispatchTouchEvent", {
+            type,
+            touchPoints,
+          });
+        await touch("touchStart", [one]);
+        await touch("touchMove", [two]);
+        await touch("touchEnd", []);
+        assert.deepEqual(await marked(), ["One", "Two"]);
+        webContents.debugger.detach();
+      } else if (phase === "remote") {
         const url = process.argv[4];
         /** @type {unknown} */
         const rejected = await window.webContents.executeJavaScript(

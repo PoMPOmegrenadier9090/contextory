@@ -52,6 +52,12 @@ import {
   type TypeDefinition,
 } from "@pkm/core";
 
+import {
+  BlockRangeSelection,
+  BlockSelection,
+  extendBlockDrag,
+  selectBlock,
+} from "./block-selection.js";
 import { conversionAt } from "./object-conversion.js";
 import { DatePanel, formatDate, Chooser, Popover } from "./view-controls.js";
 
@@ -360,6 +366,11 @@ const ObjectField = Node.create({
 /** 畳んだ行末に出す値の数。超えた分は「+n」にまとめる。 */
 const SIDE_VALUES = 3;
 
+const rangeAt = (selection: EditorState["selection"], pos: number): boolean =>
+  selection instanceof BlockRangeSelection &&
+  pos >= selection.from &&
+  pos < selection.to;
+
 const ObjectBlockView = ({
   node,
   editor,
@@ -453,6 +464,34 @@ const ObjectBlockView = ({
     >
       {/* 行頭は種別のアイコンか、チェックボックス。幅はどの種別も同じにする。 */}
       <span className="pe-object-lead" contentEditable={false}>
+        <button
+          type="button"
+          className="pe-grip"
+          aria-label="ブロックを選択"
+          aria-keyshortcuts="Shift+ArrowUp Shift+ArrowDown"
+          title="ブロックを選択（ドラッグまたは Shift＋↑↓ で範囲を広げる）"
+          onPointerDown={(event) => {
+            const at = getPos();
+            if (at === undefined || event.button !== 0 || !event.isPrimary)
+              return;
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            selectBlock(editor.view, at, event.shiftKey);
+            if (event.pointerType !== "touch") editor.view.focus();
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              extendBlockDrag(editor.view, event.clientX, event.clientY);
+          }}
+          onClick={(event) => {
+            const at = getPos();
+            if (event.detail !== 0 || at === undefined) return;
+            selectBlock(editor.view, at, event.shiftKey);
+            editor.view.focus();
+          }}
+        >
+          <span aria-hidden="true">⠿</span>
+        </button>
         {/* 開閉は左の余白に置き、行の幅を取らない。 */}
         <button
           type="button"
@@ -512,7 +551,8 @@ const ObjectBlockView = ({
           onClick={(event) => {
             const at = getPos();
             if (at === undefined) return;
-            editor.chain().focus().setNodeSelection(at).run();
+            if (!rangeAt(editor.state.selection, at))
+              editor.chain().focus().setNodeSelection(at).run();
             const rect = event.currentTarget.getBoundingClientRect();
             openMenu(at + 1, rect.right - 220, rect.bottom + 4, at);
           }}
@@ -1142,6 +1182,31 @@ const blockItems = (
   objectAt: number | null,
 ): BlockItem[] => {
   const { selection } = editor.state;
+  if (rangeAt(selection, objectAt ?? pos)) {
+    const run = (action: () => boolean): boolean => {
+      if (!selection.eq(editor.state.selection)) return false;
+      editor.view.focus();
+      return action();
+    };
+    return [
+      {
+        key: "cut",
+        label: "切り取る",
+        run: () => run(() => document.execCommand("cut")),
+      },
+      {
+        key: "copy",
+        label: "コピー",
+        run: () => run(() => document.execCommand("copy")),
+      },
+      {
+        key: "delete",
+        label: "選択したブロックを削除（ゴミ箱へ）",
+        danger: true,
+        run: () => run(() => editor.commands.deleteSelection()),
+      },
+    ];
+  }
   const types = [
     ...CONVERTIBLE,
     ...host
@@ -1158,7 +1223,7 @@ const blockItems = (
   const items: BlockItem[] = [];
   const text =
     !selection.empty &&
-    !(selection instanceof NodeSelection) &&
+    selection instanceof TextSelection &&
     pos >= selection.from &&
     pos <= selection.to;
   if (text)
@@ -1270,7 +1335,8 @@ const InputBar = ({
         if (
           scrolling !== undefined ||
           editor.isDestroyed ||
-          !editor.view.hasFocus()
+          !editor.view.hasFocus() ||
+          editor.state.selection instanceof BlockRangeSelection
         )
           return setPlace(null);
         const width = viewport?.width ?? window.innerWidth;
@@ -1490,6 +1556,7 @@ export const ObjectEditor = ({
       ObjectField,
       ObjectFieldControl,
       ObjectBlock,
+      BlockSelection,
       CollapsedGuard,
       SelectionBody,
       createTags(hostRef),
