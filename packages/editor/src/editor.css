@@ -470,3 +470,34 @@
 .pe-block-menu button[data-danger="true"] {
   color: #a3423a;
 }
+
+/* タッチの端末で、キーボードの上に浮かべる書式のボタン。 */
+.pe-input-bar {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  overflow-x: auto;
+  background: var(--pe-surface, #fffefa);
+  border: 1px solid var(--pe-line, #ddd9cf);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+}
+
+.pe-input-bar button {
+  min-width: 40px;
+  height: 36px;
+  padding: 0 8px;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+}
+
+.pe-input-bar button[aria-pressed="true"] {
+  background: var(--pe-subtle, #f8f6f1);
+}

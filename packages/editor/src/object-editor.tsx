@@ -1128,6 +1128,8 @@ interface BlockItem {
 interface BlockMenu {
   readonly x: number;
   readonly y: number;
+  /** trueなら、yを下端にして上へ開く（キーボードの上の帯から開いたとき）。 */
+  readonly above?: boolean;
   readonly items: readonly BlockItem[];
 }
 
@@ -1232,6 +1234,120 @@ const blockItems = (
   return items;
 };
 
+/* ---------- input bar ---------- */
+
+/** タッチの端末だけで、キーボードのすぐ上に書式のボタンを浮かべる。 */
+const InputBar = ({
+  editor,
+  onMore,
+}: {
+  readonly editor: Editor | null;
+  readonly onMore: (x: number, y: number) => void;
+}): React.JSX.Element | null => {
+  const [place, setPlace] = useState<{
+    readonly top: number;
+    readonly left: number;
+    readonly width: number;
+  } | null>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (
+      !editor ||
+      !window.matchMedia("(hover: none) and (pointer: coarse)").matches
+    )
+      return;
+    const viewport = window.visualViewport;
+    let frame = 0;
+    const update = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (editor.isDestroyed || !editor.view.hasFocus())
+          return setPlace(null);
+        const width = viewport?.width ?? window.innerWidth;
+        const bottom =
+          (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
+        setPlace({
+          top: bottom - (bar.current?.offsetHeight ?? 44) - 8,
+          left: (viewport?.offsetLeft ?? 0) + 12,
+          width: width - 24,
+        });
+      });
+    };
+    editor.on("selectionUpdate", update);
+    // エディタの外へ移ったときも閉じられるよう、ページのフォーカスを見る。
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", update);
+    viewport?.addEventListener("resize", update);
+    viewport?.addEventListener("scroll", update);
+    return () => {
+      cancelAnimationFrame(frame);
+      editor.off("selectionUpdate", update);
+      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusout", update);
+      viewport?.removeEventListener("resize", update);
+      viewport?.removeEventListener("scroll", update);
+    };
+  }, [editor]);
+  if (!editor || !place) return null;
+  const buttons: readonly [string, string, () => void, string?][] = [
+    ["太字", "B", () => editor.chain().focus().toggleBold().run(), "bold"],
+    ["斜体", "I", () => editor.chain().focus().toggleItalic().run(), "italic"],
+    [
+      "取り消し線",
+      "S",
+      () => editor.chain().focus().toggleStrike().run(),
+      "strike",
+    ],
+    [
+      "インデントを減らす",
+      "←",
+      () => editor.chain().focus().liftListItem("listItem").run(),
+    ],
+    [
+      "インデントを増やす",
+      "→",
+      () => editor.chain().focus().sinkListItem("listItem").run(),
+    ],
+    [
+      "その他の操作",
+      "＋",
+      () => {
+        const rect = bar.current?.getBoundingClientRect();
+        onMore(rect?.left ?? 12, (rect?.top ?? 0) - 8);
+      },
+    ],
+    ["キーボードを閉じる", "⌄", () => editor.commands.blur()],
+  ];
+  return (
+    <div
+      ref={bar}
+      className="pe-input-bar"
+      role="toolbar"
+      aria-label="本文の書式"
+      style={{ top: place.top, left: place.left, maxWidth: place.width }}
+    >
+      {buttons.map(([label, text, run, mark]) => (
+        <button
+          key={label}
+          type="button"
+          aria-label={label}
+          title={label}
+          aria-pressed={mark ? editor.isActive(mark) : undefined}
+          // キーボードとカーソルを残したまま押せるようにする。
+          onPointerDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            if (editor.view.composing) return;
+            run();
+          }}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 /* ---------- component ---------- */
 
 export const ObjectEditor = ({
@@ -1252,7 +1368,13 @@ export const ObjectEditor = ({
   const editorRef = useRef<Editor | null>(null);
   const [openBlockMenu] = useState(
     () =>
-      (pos: number, x: number, y: number, objectAt?: number): void => {
+      (
+        pos: number,
+        x: number,
+        y: number,
+        objectAt?: number,
+        above = false,
+      ): void => {
         const current = editorRef.current;
         if (!current) return;
         let at = objectAt ?? null;
@@ -1263,6 +1385,7 @@ export const ObjectEditor = ({
         setBlockMenu({
           x,
           y,
+          above,
           items: blockItems(current, hostRef.current, pos, at),
         });
       },
@@ -1377,13 +1500,27 @@ export const ObjectEditor = ({
       <BlockMenuContext.Provider value={openBlockMenu}>
         <EditorContent className="pe-editor" editor={editor} />
       </BlockMenuContext.Provider>
+      <InputBar
+        editor={editor}
+        onMore={(x, y) => {
+          if (editor)
+            openBlockMenu(editor.state.selection.from, x, y, undefined, true);
+        }}
+      />
       {blockMenu ? (
         <div
           className="pe-menu pe-block-menu"
           role="menu"
           style={{
             left: Math.max(8, Math.min(blockMenu.x, window.innerWidth - 240)),
-            top: Math.max(8, Math.min(blockMenu.y, window.innerHeight - 320)),
+            ...(blockMenu.above
+              ? { bottom: window.innerHeight - blockMenu.y }
+              : {
+                  top: Math.max(
+                    8,
+                    Math.min(blockMenu.y, window.innerHeight - 320),
+                  ),
+                }),
           }}
           onMouseDown={(event) => event.preventDefault()}
         >

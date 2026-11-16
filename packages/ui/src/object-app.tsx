@@ -21,7 +21,7 @@ import {
   typeLabel,
   type EditorHost,
 } from "@pkm/editor";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { captureMemo, emptyBody, type CaptureInput } from "./capture.js";
 import { DayMemoCard } from "./day-memo.js";
@@ -311,7 +311,12 @@ export const ObjectApp = ({
     recent: [],
     memos: [],
   });
-  const [types, setTypes] = useState<readonly TypeDefinition[]>([]);
+  const [types, setAllTypes] = useState<readonly TypeDefinition[]>([]);
+  const setTypes: typeof setAllTypes = (next) =>
+    setAllTypes((last) => {
+      const value = typeof next === "function" ? next(last) : next;
+      return JSON.stringify(value) === JSON.stringify(last) ? last : value;
+    });
   /** 開いている種別のページ。settingsなら、Viewではなく種別の設定を出す。 */
   const [typePage, setTypePage] = useState<{
     readonly name: string;
@@ -380,8 +385,15 @@ export const ObjectApp = ({
 
   const page = loaded?.hostId ?? null;
   const current = page === null ? undefined : objects[page];
+  // 中身が同じなら前の値を残し、エディタを描き直させない。
   const merge = (next: Readonly<Record<string, ObjectSummary>>): void =>
-    setObjects((cache) => ({ ...cache, ...next }));
+    setObjects((cache) =>
+      Object.entries(next).every(
+        ([id, object]) => JSON.stringify(cache[id]) === JSON.stringify(object),
+      )
+        ? cache
+        : { ...cache, ...next },
+    );
   /** ゴミ箱へ移したObjectを、参照チップで削除済みに見せる。 */
   const forget = (id: string): void =>
     setObjects((cache) =>
@@ -622,45 +634,53 @@ export const ObjectApp = ({
     });
   };
 
-  const host: EditorHost = {
-    lookup: (id) => objects[id],
-    types: () => types,
-    page: current ? { id: current.id, type: current.type } : null,
-    search: (query) =>
-      client.searchObjects(query, page).then((found) => {
-        merge(Object.fromEntries(found.map((o) => [o.id, o])));
-        return found;
-      }),
-    create: (type, title, parentId) => {
-      const id = newId();
-      const parent = parentId ?? (page && !isDaily(page) ? page : null);
-      mutate(() => client.createObject({ id, type, title, parentId: parent }), {
-        id,
-        type,
-        title,
-        done: false,
-        contexts: inheritedContexts(parent ? objects[parent] : undefined),
-        createdAt: Date.now(),
-      });
-      return id;
-    },
-    open,
-    openType: (type) => openType(type),
-    // 継承したFieldは、定義している種別の選択肢に足す。
-    addOption: (fieldId, option) => {
-      const definer = types.find((definition) =>
-        definition.fields.some((field) => field.id === fieldId),
-      );
-      if (definer)
-        patchType(definer.name, {
-          fields: definer.fields.map((field) =>
-            field.id === fieldId
-              ? { ...field, options: [...(field.options ?? []), option] }
-              : field,
-          ),
-        });
-    },
-  };
+  // 保存の状態などで描き直すたびに作り直すと、埋め込んだObjectがすべて描き直される。
+  // 表示に関わるObject・種別・開いているページが変わったときだけ作り直す。
+  const host = useMemo<EditorHost>(
+    () => ({
+      lookup: (id) => objects[id],
+      types: () => types,
+      page: current ? { id: current.id, type: current.type } : null,
+      search: (query) =>
+        client.searchObjects(query, page).then((found) => {
+          merge(Object.fromEntries(found.map((o) => [o.id, o])));
+          return found;
+        }),
+      create: (type, title, parentId) => {
+        const id = newId();
+        const parent = parentId ?? (page && !isDaily(page) ? page : null);
+        mutate(
+          () => client.createObject({ id, type, title, parentId: parent }),
+          {
+            id,
+            type,
+            title,
+            done: false,
+            contexts: inheritedContexts(parent ? objects[parent] : undefined),
+            createdAt: Date.now(),
+          },
+        );
+        return id;
+      },
+      open,
+      openType: (type) => openType(type),
+      // 継承したFieldは、定義している種別の選択肢に足す。
+      addOption: (fieldId, option) => {
+        const definer = types.find((definition) =>
+          definition.fields.some((field) => field.id === fieldId),
+        );
+        if (definer)
+          patchType(definer.name, {
+            fields: definer.fields.map((field) =>
+              field.id === fieldId
+                ? { ...field, options: [...(field.options ?? []), option] }
+                : field,
+            ),
+          });
+      },
+    }),
+    [objects, types, page, current?.id, current?.type],
+  );
 
   const showCapture = (input: CaptureInput): void => {
     capturedBody.current = input.body;
