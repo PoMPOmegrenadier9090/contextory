@@ -215,7 +215,8 @@ body,
   font-size: 18px;
 }
 
-.od-create-dialog label {
+.od-create-dialog label,
+.od-dialog-field {
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -224,7 +225,7 @@ body,
 }
 
 .od-create-dialog input,
-.od-create-dialog select {
+.od-demo .od-dialog-field .od-pop > button {
   padding: 8px 10px;
   color: var(--od-ink);
   background: var(--od-surface);
@@ -239,7 +240,8 @@ body,
 }
 
 .od-dialog-actions button,
-.od-daily-nav button {
+.od-daily-nav > button,
+.od-demo .od-daily-nav .od-pop > button {
   padding: 6px 10px;
   color: var(--od-ink);
   background: var(--od-surface);
@@ -366,12 +368,13 @@ body,
   align-items: center;
 }
 
-.od-daily-nav input {
-  padding: 5px 8px;
-  color: var(--od-ink);
-  background: var(--od-surface);
-  border: 1px solid var(--od-line-strong);
-  border-radius: 7px;
+/* 窓を開くボタンは、左寄せで幅いっぱいにする。 */
+.od-demo .od-dialog-field .od-pop > button {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
 }
 
 .od-type {
@@ -672,8 +675,9 @@ body,
   color: var(--od-muted);
 }
 
-.od-demo .od-fields input,
-.od-demo .od-fields select {
+.od-demo .od-fields > li > input,
+.od-demo .od-fields .od-pop > button,
+.od-demo .od-type-option .od-pop > button {
   padding: 4px 8px;
   font-size: 14px !important;
   background: var(--od-surface);
@@ -713,13 +717,15 @@ body,
   margin-left: 16px;
 }
 
-.od-demo .od-type-option select {
+.od-demo .od-type-option .od-pop {
   margin-left: 8px;
-  padding: 2px 6px;
-  font-size: 13px !important;
-  background: var(--od-surface);
-  border: 1px solid var(--od-line);
-  border-radius: 6px;
+}
+
+.od-demo .od-fields .od-pop > button,
+.od-demo .od-type-option .od-pop > button {
+  color: var(--od-ink);
+  font: inherit;
+  cursor: pointer;
 }
 
 .od-demo .od-fields .od-field-options {

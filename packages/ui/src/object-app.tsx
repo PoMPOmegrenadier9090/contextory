@@ -12,7 +12,15 @@ import {
   type ObjectTypePatch,
   type TypeDefinition,
 } from "@pkm/core";
-import { ObjectEditor, typeLabel, type EditorHost } from "@pkm/editor";
+import {
+  CheckItem,
+  DatePanel,
+  formatDate,
+  ObjectEditor,
+  Popover,
+  typeLabel,
+  type EditorHost,
+} from "@pkm/editor";
 import { useEffect, useRef, useState } from "react";
 
 import { captureMemo, emptyBody, type CaptureInput } from "./capture.js";
@@ -104,22 +112,30 @@ const TypeSettings = ({
         />
         行頭に完了のチェックボックスを出す
       </label>
-      <label className="od-status od-type-option">
+      <div className="od-status od-type-option">
         継承元
-        <select
-          value={definition.extends ?? ""}
-          onChange={(event) =>
-            onPatch({ extends: event.currentTarget.value || null })
+        <Popover
+          ariaLabel="継承元"
+          label={
+            definition.extends ? `#${typeLabel(definition.extends)}` : "なし"
           }
         >
-          <option value="">なし</option>
-          {others.map((other) => (
-            <option key={other.name} value={other.name}>
-              #{typeLabel(other.name)}
-            </option>
-          ))}
-        </select>
-      </label>
+          {(close) =>
+            [null, ...others.map((other) => other.name)].map((name) => (
+              <CheckItem
+                key={name ?? ""}
+                checked={definition.extends === name}
+                onChange={() => {
+                  onPatch({ extends: name });
+                  close();
+                }}
+              >
+                {name ? `#${typeLabel(name)}` : "なし"}
+              </CheckItem>
+            ))
+          }
+        </Popover>
+      </div>
       <section className="od-panel">
         <header>
           <div>
@@ -148,22 +164,24 @@ const TypeSettings = ({
                         setField(index, { name });
                     }}
                   />
-                  <select
-                    aria-label="Fieldの型"
-                    value={field.kind}
-                    onChange={(event) =>
-                      setField(index, {
-                        kind: event.currentTarget
-                          .value as keyof typeof KIND_LABEL,
-                      })
+                  <Popover ariaLabel="Fieldの型" label={KIND_LABEL[field.kind]}>
+                    {(close) =>
+                      Object.entries(KIND_LABEL).map(([kind, label]) => (
+                        <CheckItem
+                          key={kind}
+                          checked={field.kind === kind}
+                          onChange={() => {
+                            setField(index, {
+                              kind: kind as keyof typeof KIND_LABEL,
+                            });
+                            close();
+                          }}
+                        >
+                          {label}
+                        </CheckItem>
+                      ))
                     }
-                  >
-                    {Object.entries(KIND_LABEL).map(([kind, label]) => (
-                      <option key={kind} value={kind}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  </Popover>
                   {field.kind === "select" ? (
                     <input
                       key={(field.options ?? []).join()}
@@ -892,19 +910,25 @@ export const ObjectApp = ({
             }}
           >
             <h2 id="od-create-title">Objectを作成</h2>
-            <label>
+            <div className="od-dialog-field">
               種別
-              <select
-                value={createType}
-                onChange={(event) => setCreateType(event.currentTarget.value)}
-              >
-                {types.map((definition) => (
-                  <option key={definition.name} value={definition.name}>
-                    #{typeLabel(definition.name)}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <Popover ariaLabel="種別" label={`#${typeLabel(createType)}`}>
+                {(close) =>
+                  types.map((definition) => (
+                    <CheckItem
+                      key={definition.name}
+                      checked={createType === definition.name}
+                      onChange={() => {
+                        setCreateType(definition.name);
+                        close();
+                      }}
+                    >
+                      #{typeLabel(definition.name)}
+                    </CheckItem>
+                  ))
+                }
+              </Popover>
+            </div>
             <label>
               Title
               <input
@@ -1083,15 +1107,20 @@ export const ObjectApp = ({
                     >
                       ‹
                     </button>
-                    <input
-                      type="date"
-                      aria-label="Dailyの日付"
-                      value={selectedDate ?? localDate()}
-                      onChange={(event) => {
-                        const date = event.currentTarget.value;
-                        if (date) open(dailyHostId(date));
-                      }}
-                    />
+                    <Popover
+                      ariaLabel="Dailyの日付"
+                      label={formatDate(selectedDate ?? localDate())}
+                    >
+                      {(close) => (
+                        <DatePanel
+                          value={selectedDate ?? localDate()}
+                          onPick={(date) => {
+                            if (date) open(dailyHostId(date));
+                            close();
+                          }}
+                        />
+                      )}
+                    </Popover>
                     <button
                       type="button"
                       aria-label="次の日"
