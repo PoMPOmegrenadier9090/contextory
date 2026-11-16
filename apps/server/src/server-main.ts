@@ -17,6 +17,7 @@ const app = await openServerApp({
   logger: true,
   webRoot,
   objectStorePath: resolve(serverDataDir, "objects.sqlite"),
+  backupDir: resolve(serverDataDir, "backups"),
 });
 await app.listen({ host, port: portValue });
 

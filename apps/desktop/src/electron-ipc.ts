@@ -93,6 +93,22 @@ export const registerDesktopIpc = ({
       );
     },
   );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTrash, (_event, id) =>
+    client().trashObject(requireRequestString(id, "id")),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectRestore, (_event, id) =>
+    client().restoreObject(requireRequestString(id, "id")),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectPurge, (_event, id) =>
+    client().purgeObject(requireRequestString(id, "id")),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTrashList, () => client().trash());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectEmptyTrash, () =>
+    client().emptyTrash(),
+  );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.objectDeleteType, (_event, name) =>
+    client().deleteType(requireRequestString(name, "name")),
+  );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectTypes, () => client().types());
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.objectUpdateType,

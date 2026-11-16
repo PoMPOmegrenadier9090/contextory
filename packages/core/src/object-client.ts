@@ -86,7 +86,18 @@ export interface ObjectClient {
     anchorId: string | null,
     today: string,
   ): Promise<ViewResult>;
+  /** ゴミ箱へ移す。置かれている文書の本文からは外れる。 */
+  trashObject(id: string): Promise<ObjectSummary>;
+  /** ゴミ箱から戻す。置き場所の無いObjectとして戻る。 */
+  restoreObject(id: string): Promise<ObjectSummary>;
+  /** ゴミ箱にあるObjectを完全に削除する。 */
+  purgeObject(id: string): Promise<void>;
+  /** ゴミ箱のObject。移した日時の新しい順。 */
+  trash(): Promise<readonly ObjectSummary[]>;
+  emptyTrash(): Promise<void>;
   types(): Promise<readonly TypeDefinition[]>;
   updateType(name: string, patch: ObjectTypePatch): Promise<TypeDefinition>;
+  /** ユーザーが作った種別を消す。その種別のObjectが残っていれば断られる。 */
+  deleteType(name: string): Promise<void>;
   overview(from: number, to: number): Promise<ObjectOverview>;
 }

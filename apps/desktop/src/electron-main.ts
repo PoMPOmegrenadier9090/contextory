@@ -1,9 +1,10 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createHttpObjectClient, type ObjectClient } from "@pkm/core";
 import { ObjectStore } from "@pkm/storage-node";
-import { app, BrowserWindow, Menu, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, safeStorage, shell } from "electron";
 
 import { registerDesktopIpc } from "./electron-ipc.js";
 import { registerDesktopLifecycle } from "./electron-lifecycle.js";
@@ -113,6 +114,62 @@ const switchTo = (next: ServerConnection | null): void => {
     if (window !== connectionWindow) window.webContents.reload();
 };
 
+const today = (): string => new Date().toISOString().slice(0, 10);
+/** つないでいるサーバーから、バックアップや書き出しを受け取る。 */
+const download = async (
+  server: ServerConnection,
+  path: string,
+): Promise<Buffer> => {
+  const response = await fetch(`${server.url}/api/next${path}`, {
+    headers: accessHeaders(server),
+    redirect: "manual",
+  });
+  if (!response.ok)
+    throw new Error(
+      response.status >= 300 && response.status < 400
+        ? "サーバーの認証に失敗しました（Cloudflare Access）"
+        : `HTTP ${response.status}`,
+    );
+  return Buffer.from(await response.arrayBuffer());
+};
+const exportBackup = async (): Promise<void> => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    defaultPath: `contextory-${today()}.sqlite`,
+  });
+  if (canceled || !filePath) return;
+  if (connection)
+    await writeFile(filePath, await download(connection, "/backup"));
+  else await objects.backup(filePath);
+};
+const exportMarkdown = async (): Promise<void> => {
+  if (connection) {
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      defaultPath: `contextory-${today()}.zip`,
+    });
+    if (canceled || !filePath) return;
+    await writeFile(filePath, await download(connection, "/export/markdown"));
+    return;
+  }
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (canceled || !filePaths[0]) return;
+  const root = join(filePaths[0], `contextory-${today()}`);
+  for (const file of objects.exportMarkdown()) {
+    const path = join(root, file.path);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, file.text);
+  }
+};
+const reportFailure = (task: () => Promise<void>) => (): void => {
+  void task().catch((error: unknown) =>
+    dialog.showErrorBox(
+      "書き出せませんでした",
+      error instanceof Error ? error.message : String(error),
+    ),
+  );
+};
+
 registerDesktopLifecycle(
   createWindow,
   () => {
@@ -147,6 +204,15 @@ Menu.setApplicationMenu(
         { type: "separator" },
         { label: "サーバー接続…", click: openConnectionWindow },
         { type: "separator" },
+        {
+          label: "バックアップを書き出す…",
+          click: reportFailure(exportBackup),
+        },
+        {
+          label: "Markdownで書き出す…",
+          click: reportFailure(exportMarkdown),
+        },
+        { type: "separator" },
         { role: "services" },
         { type: "separator" },
         { role: "hide" },
@@ -175,7 +241,8 @@ if (smoke) {
         methods: [
           'loadPage', 'savePage', 'searchObjects',
           'createObject', 'patchObject', 'queryView',
-          'types', 'updateType', 'overview'
+          'types', 'updateType', 'overview', 'trashObject',
+          'restoreObject', 'purgeObject', 'trash', 'emptyTrash', 'deleteType'
         ].every((name) => typeof window.pkm?.[name] === 'function')
       });
       const initial = inspect();

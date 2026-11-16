@@ -81,9 +81,17 @@ export const createHttpObjectClient = ({
         "GET",
         `/views/${encode(viewId)}?today=${encode(today)}${anchorId ? `&anchor=${encode(anchorId)}` : ""}`,
       ),
+    trashObject: (id) =>
+      request<ObjectSummary>("POST", `/objects/${encode(id)}/trash`),
+    restoreObject: (id) =>
+      request<ObjectSummary>("POST", `/objects/${encode(id)}/restore`),
+    purgeObject: (id) => request<void>("DELETE", `/objects/${encode(id)}`),
+    trash: () => request<readonly ObjectSummary[]>("GET", "/trash"),
+    emptyTrash: () => request<void>("DELETE", "/trash"),
     types: () => request<readonly TypeDefinition[]>("GET", "/types"),
     updateType: (name, patch) =>
       request<TypeDefinition>("PATCH", `/types/${encode(name)}`, patch),
+    deleteType: (name) => request<void>("DELETE", `/types/${encode(name)}`),
     overview: (from, to) =>
       request<ObjectOverview>("GET", `/overview?from=${from}&to=${to}`),
   };

@@ -42,12 +42,14 @@ const TypeSettings = ({
   others,
   onPatch,
   onBack,
+  onDelete,
 }: {
   readonly definition: TypeDefinition;
   /** 継承元に選べる種別 */
   readonly others: readonly TypeDefinition[];
   readonly onPatch: (patch: ObjectTypePatch) => void;
   readonly onBack: () => void;
+  readonly onDelete: () => void;
 }): React.JSX.Element => {
   const { fields } = definition;
   const setField = (index: number, patch: Partial<FieldDefinition>): void =>
@@ -255,6 +257,21 @@ const TypeSettings = ({
           ＋ Fieldを追加
         </button>
       </section>
+      {definition.builtin ? null : (
+        <section className="od-panel">
+          <header>
+            <div>
+              <h2>種別を削除</h2>
+              <p>
+                この種別のObjectをすべて完全に削除し、継承している種別も無ければ消せる。FieldとViewも消える
+              </p>
+            </div>
+          </header>
+          <button type="button" className="od-danger" onClick={onDelete}>
+            #{typeLabel(definition.name)}を削除
+          </button>
+        </section>
+      )}
     </>
   );
 };
@@ -280,10 +297,13 @@ const caretOnFirstLine = (root: Element, caret: Range): boolean => {
 export const ObjectApp = ({
   client,
   location = "サーバーのSQLiteへ保存",
+  downloads = true,
 }: {
   readonly client: ObjectClient;
   /** 保存先の説明。ナビゲーションの下に出す。 */
   readonly location?: string;
+  /** バックアップと書き出しのリンクを出すか。Desktopではメニューから行う。 */
+  readonly downloads?: boolean;
 }): React.JSX.Element => {
   const [loaded, setLoaded] = useState<{
     readonly key: number;
@@ -304,6 +324,10 @@ export const ObjectApp = ({
     readonly name: string;
     readonly settings: boolean;
   } | null>(null);
+  /** 開いているゴミ箱の中身。nullならゴミ箱を開いていない。 */
+  const [trashList, setTrashList] = useState<readonly ObjectSummary[] | null>(
+    null,
+  );
   /** 書き込みが済むたびに増やす。Viewを読み直す合図。 */
   const [tick, setTick] = useState(0);
   /** "saved"、"saving"、または失敗の理由 */
@@ -343,6 +367,11 @@ export const ObjectApp = ({
   const current = page === null ? undefined : objects[page];
   const merge = (next: Readonly<Record<string, ObjectSummary>>): void =>
     setObjects((cache) => ({ ...cache, ...next }));
+  /** ゴミ箱へ移したObjectを、参照チップで削除済みに見せる。 */
+  const forget = (id: string): void =>
+    setObjects((cache) =>
+      Object.fromEntries(Object.entries(cache).filter(([key]) => key !== id)),
+    );
 
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     setStatus("saving");
@@ -444,6 +473,7 @@ export const ObjectApp = ({
       setTitle(own === "無題" ? "" : own);
       setLoaded({ key: ++loads.current, hostId, doc: result.doc });
       setTypePage(null);
+      setTrashList(null);
       await refreshSide(hostId);
       window.scrollTo({ top: 0 });
     });
@@ -455,8 +485,26 @@ export const ObjectApp = ({
       setTypes(await client.types());
       // 文書は開き直した時に、新しい定義で組み立て直す。
       setLoaded(null);
+      setTrashList(null);
       setTypePage({ name, settings: false });
       window.scrollTo({ top: 0 });
+    });
+  };
+
+  const openTrash = (): void => {
+    flush();
+    void enqueue(async () => {
+      setTrashList(await client.trash());
+      setLoaded(null);
+      setTypePage(null);
+      window.scrollTo({ top: 0 });
+    });
+  };
+  /** ゴミ箱での操作。済んだら一覧を読み直す。 */
+  const actOnTrash = (task: () => Promise<unknown>): void => {
+    void enqueue(async () => {
+      await task();
+      setTrashList(await client.trash());
     });
   };
 
@@ -478,6 +526,33 @@ export const ObjectApp = ({
     void enqueue(async () => {
       await task();
       await reload();
+    });
+  };
+  /** 確かめてからゴミ箱へ移す。開いているObjectなら、今日のDailyへ移る。 */
+  const trashObject = (object: ObjectSummary): void => {
+    if (
+      !window.confirm(
+        `「${object.title}」をゴミ箱へ移しますか？\n置かれている文書の本文からも外れます。ゴミ箱から戻せます。`,
+      )
+    )
+      return;
+    const leaving = pageRef.current === object.id;
+    flush();
+    void enqueue(async () => {
+      await client.trashObject(object.id);
+      forget(object.id);
+      if (!leaving) await reload();
+    });
+    if (leaving) open(dailyHostId());
+  };
+  const deleteType = (name: string): void => {
+    if (!window.confirm(`#${typeLabel(name)}を削除しますか？元に戻せません。`))
+      return;
+    flush();
+    void enqueue(async () => {
+      // 断られたときは設定に留まり、理由を保存の欄に出す。
+      await client.deleteType(name);
+      open(dailyHostId());
     });
   };
   const patchType = (name: string, patch: ObjectTypePatch): void => {
@@ -656,6 +731,7 @@ export const ObjectApp = ({
     open,
     act,
     patchType,
+    trash: trashObject,
   };
   // この日のDailyに置いたMemoは本文で読めるので、欄には出さない。
   const dayMemos = overview.memos.filter((memo) => memo.hostId !== page);
@@ -982,6 +1058,14 @@ export const ObjectApp = ({
               #{typeLabel(definition.name)}
             </button>
           ))}
+          <button
+            type="button"
+            className="od-nav-project"
+            aria-current={trashList ? "page" : undefined}
+            onClick={openTrash}
+          >
+            ゴミ箱
+          </button>
           <dl className="od-keys">
             <dt>@</dt>
             <dd>参照・新規作成</dd>
@@ -993,9 +1077,91 @@ export const ObjectApp = ({
             <dd>Title先頭でObjectを解除</dd>
           </dl>
           <p className="od-nav-note">{location}</p>
+          {downloads ? (
+            <p className="od-nav-note od-nav-downloads">
+              <a href="/api/next/backup" download>
+                バックアップを保存
+              </a>
+              <a href="/api/next/export/markdown" download>
+                Markdownで書き出す
+              </a>
+            </p>
+          ) : null}
         </nav>
         <main className="od-main">
-          {typePage && !typeOf(typePage.name) ? (
+          {trashList ? (
+            <>
+              <header className="od-page-header">
+                <span className="od-type">ゴミ箱</span>
+                <h1>ゴミ箱</h1>
+                <div className="od-page-meta od-type-actions">
+                  <button
+                    type="button"
+                    disabled={!trashList.length}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `ゴミ箱の${trashList.length}件を完全に削除しますか？元に戻せません。`,
+                        )
+                      )
+                        actOnTrash(() => client.emptyTrash());
+                    }}
+                  >
+                    ゴミ箱を空にする
+                  </button>
+                </div>
+                <p className="od-page-lead">
+                  戻したObjectは、どの文書にも置かれていない状態で戻る。自動では消えない。
+                </p>
+              </header>
+              {trashList.length ? (
+                <ul className="od-rows">
+                  {trashList.map((object) => (
+                    <li key={object.id} className="od-row od-trash-row">
+                      <span
+                        className="od-type"
+                        data-type={object.type}
+                        data-color={colorOf(object.type)}
+                      >
+                        {typeLabel(object.type)}
+                      </span>
+                      <span className="od-trash-title">{object.title}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          actOnTrash(async () =>
+                            merge({
+                              [object.id]: await client.restoreObject(
+                                object.id,
+                              ),
+                            }),
+                          )
+                        }
+                      >
+                        戻す
+                      </button>
+                      <button
+                        type="button"
+                        className="od-danger"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `「${object.title}」を完全に削除しますか？元に戻せません。`,
+                            )
+                          )
+                            actOnTrash(() => client.purgeObject(object.id));
+                        }}
+                      >
+                        完全に削除
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="od-empty">ゴミ箱は空です。</p>
+              )}
+            </>
+          ) : typePage && !typeOf(typePage.name) ? (
             <p className="od-empty">この種別はありません。</p>
           ) : typePage?.settings ? (
             <TypeSettings
@@ -1005,6 +1171,7 @@ export const ObjectApp = ({
               )}
               onPatch={(patch) => patchType(typePage.name, patch)}
               onBack={() => setTypePage({ ...typePage, settings: false })}
+              onDelete={() => deleteType(typePage.name)}
             />
           ) : typePage ? (
             <>
@@ -1088,6 +1255,13 @@ export const ObjectApp = ({
                         完了
                       </label>
                     ) : null}
+                    <button
+                      type="button"
+                      className="od-page-trash"
+                      onClick={() => trashObject(current)}
+                    >
+                      ゴミ箱へ移す
+                    </button>
                   </div>
                 </header>
               ) : (

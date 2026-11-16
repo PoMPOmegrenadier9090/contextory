@@ -15,6 +15,7 @@ createRoot(root).render(
   <StrictMode>
     <ObjectApp
       client={window.pkm}
+      downloads={false}
       location={
         connection
           ? `${new URL(connection.url).host}へ保存`

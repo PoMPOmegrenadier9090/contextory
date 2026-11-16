@@ -47,10 +47,20 @@ const api: DesktopApi = {
       ...(anchorId ? { anchor: anchorId } : {}),
       today,
     }),
+  trashObject: (id) =>
+    invoke<ObjectSummary>(DESKTOP_IPC_CHANNELS.objectTrash, id),
+  restoreObject: (id) =>
+    invoke<ObjectSummary>(DESKTOP_IPC_CHANNELS.objectRestore, id),
+  purgeObject: (id) => invoke<void>(DESKTOP_IPC_CHANNELS.objectPurge, id),
+  trash: () =>
+    invoke<readonly ObjectSummary[]>(DESKTOP_IPC_CHANNELS.objectTrashList),
+  emptyTrash: () => invoke<void>(DESKTOP_IPC_CHANNELS.objectEmptyTrash),
   types: () =>
     invoke<readonly TypeDefinition[]>(DESKTOP_IPC_CHANNELS.objectTypes),
   updateType: (name, patch) =>
     invoke<TypeDefinition>(DESKTOP_IPC_CHANNELS.objectUpdateType, name, patch),
+  deleteType: (name) =>
+    invoke<void>(DESKTOP_IPC_CHANNELS.objectDeleteType, name),
   overview: (from, to) =>
     invoke<ObjectOverview>(DESKTOP_IPC_CHANNELS.objectOverview, { from, to }),
 };

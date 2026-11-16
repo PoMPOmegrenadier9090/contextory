@@ -82,7 +82,30 @@ docker compose --env-file deploy/.env logs --tail 100 pkm cloudflared
 docker compose --env-file deploy/.env --profile tunnel stop
 ```
 
-停止してもnamed volumeは残る。`docker compose down -v`はDBを削除するので使わない。`server-data` volumeの`objects.sqlite`を定期的にバックアップする。
+停止してもnamed volumeは残る。`docker compose down -v`はDBを削除するので使わない。
+
+### バックアップ
+
+サーバーは、起動時と1日1回、`server-data` volumeの`backups/`にDBの複製（`objects-日時.sqlite`）を作り、新しい7個を残す。複製は同じvolumeにあるので、ディスクやホストを失うと一緒に失われる。別の場所にも置く。
+
+- Webでは、ナビゲーションの下の「バックアップを保存」で、その時点の複製を落とせる。`GET /api/next/backup`と同じ。
+- Macアプリでは、メニュー「Contextory」→「バックアップを書き出す…」で保存する。サーバーにつないでいればサーバーのDB、つないでいなければMac内のDBを書き出す。
+- 「Markdownで書き出す」は、アプリの外で読むためのもの。DailyとObjectごとの`.md`になり、読み込んで戻すことはできない。
+
+### バックアップから戻す
+
+戻すと、バックアップの後の変更はすべて失われる。今のDBも、戻す前に複製しておく。
+
+```sh
+docker compose --env-file deploy/.env --profile tunnel stop pkm
+docker compose --env-file deploy/.env run --rm --no-deps --entrypoint sh pkm -c \
+  'cd /server-data && mkdir -p replaced && mv objects.sqlite* replaced/ && cp backups/objects-日時.sqlite objects.sqlite'
+docker compose --env-file deploy/.env --profile tunnel start pkm
+```
+
+手元に落としたファイルから戻すときは、`docker compose cp`でvolumeの`/server-data/backups/`へ置いてから、同じ手順で戻す。Macアプリの手元のDBは、アプリを終了してから、アプリのデータフォルダ（`~/Library/Application Support/Contextory/`）の`objects.sqlite`と`objects.sqlite-wal`・`objects.sqlite-shm`を退避し、バックアップを`objects.sqlite`として置く。
+
+古い版のアプリで作ったバックアップは、新しい版で開くと起動時に形式が上がる。新しい版で作ったバックアップは、古い版のアプリでは開けない。
 
 ## 公式資料
 

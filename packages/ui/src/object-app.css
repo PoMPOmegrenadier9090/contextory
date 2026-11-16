@@ -517,6 +517,42 @@ body,
   font-size: 12px;
 }
 
+/* ゴミ箱 */
+.od-demo .od-trash-row > button,
+.od-demo .od-page-trash,
+.od-demo .od-panel > .od-danger {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 7px;
+}
+
+.od-demo .od-page-trash {
+  color: var(--od-muted);
+}
+
+.od-demo .od-danger {
+  color: #a3423a;
+}
+
+.od-trash-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.od-nav-downloads {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.od-nav-downloads a {
+  color: var(--od-muted);
+}
+
 .od-conflict {
   display: grid;
   gap: 8px;
