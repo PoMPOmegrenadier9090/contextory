@@ -16,8 +16,14 @@ export const localObjectClient = (store: ObjectStore): ObjectClient => {
       run(() => store.patchObject(id, patch, Date.now())),
     queryView: (viewId, anchorId, today) =>
       run(() => store.queryView(viewId, anchorId, today)),
+    trashObject: (id) => run(() => store.trashObject(id, Date.now())),
+    restoreObject: (id) => run(() => store.restoreObject(id)),
+    purgeObject: (id) => run(() => store.purgeObject(id)),
+    trash: () => run(() => store.trash()),
+    emptyTrash: () => run(() => store.emptyTrash()),
     types: () => run(() => store.types()),
     updateType: (name, patch) => run(() => store.updateType(name, patch)),
+    deleteType: (name) => run(() => store.deleteType(name)),
     overview: (from, to) => run(() => store.overview(from, to)),
   };
 };

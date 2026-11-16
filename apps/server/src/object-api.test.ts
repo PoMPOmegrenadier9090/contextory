@@ -1,9 +1,12 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ObjectPage, TypeDefinition, ViewResult } from "@pkm/core";
+import { ObjectStore } from "@pkm/storage-node";
+import { BACKUP_KEEP, rotateBackup } from "./backups.js";
 import { openServerApp } from "./http-api.js";
 
 const directories: string[] = [];
@@ -183,5 +186,76 @@ describe("object API", () => {
     expect(stale.json<{ message: string }>().message).toContain(
       "PAGE_CONFLICT",
     );
+  });
+
+  it("moves objects to the trash and serves backups and Markdown", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
+    directories.push(parent);
+    const app = await open(parent);
+    await app.inject({
+      method: "POST",
+      url: "/api/next/objects",
+      payload: { id: "p1", type: "project", title: "計画" },
+    });
+    expect(
+      (await app.inject({ method: "POST", url: "/api/next/objects/p1/trash" }))
+        .statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ url: "/api/next/trash" })).json<{ id: string }[]>(),
+    ).toMatchObject([{ id: "p1" }]);
+    expect(
+      (await app.inject({ method: "DELETE", url: "/api/next/types/task" }))
+        .statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/next/objects/p1/restore",
+        })
+      ).statusCode,
+    ).toBe(200);
+    // ゴミ箱に無いObjectは完全に削除できない。
+    expect(
+      (await app.inject({ method: "DELETE", url: "/api/next/objects/p1" }))
+        .statusCode,
+    ).toBe(404);
+
+    const backup = await app.inject({ url: "/api/next/backup" });
+    expect(backup.headers["content-disposition"]).toMatch(/\.sqlite"$/);
+    expect(backup.rawPayload.subarray(0, 15).toString()).toBe(
+      "SQLite format 3",
+    );
+
+    const exported = await app.inject({ url: "/api/next/export/markdown" });
+    expect(exported.headers["content-type"]).toBe("application/zip");
+    // 先頭のファイルを、zipのローカルヘッダーから読み出す。
+    const zipped = exported.rawPayload;
+    const nameLength = zipped.readUInt16LE(26);
+    expect(zipped.subarray(30, 30 + nameLength).toString()).toBe(
+      "objects/project/計画-p1.md",
+    );
+    expect(
+      inflateRawSync(
+        zipped.subarray(
+          30 + nameLength,
+          30 + nameLength + zipped.readUInt32LE(18),
+        ),
+      ).toString(),
+    ).toContain("# 計画");
+  });
+
+  it("keeps the newest backups", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
+    directories.push(parent);
+    const store = new ObjectStore(join(parent, "objects.sqlite"));
+    const dir = join(parent, "backups");
+    for (let day = 1; day <= BACKUP_KEEP + 2; day++)
+      await rotateBackup(store, dir, new Date(Date.UTC(2026, 10, day)));
+    store.close();
+    const names = (await readdir(dir)).sort();
+    expect(names).toHaveLength(BACKUP_KEEP);
+    expect(names[0]).toBe("objects-2026-11-03T00-00-00-000Z.sqlite");
   });
 });

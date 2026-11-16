@@ -136,7 +136,11 @@ describe("ObjectStore", () => {
     store.addContext("moved", "area");
     // 切り取った側の保存が先に走っても、Objectは残る。
     store.savePage(DAILY, doc(), 11);
-    const page = store.savePage("project", doc(block("moved", "memo", "メモ")), 12);
+    const page = store.savePage(
+      "project",
+      doc(block("moved", "memo", "メモ")),
+      12,
+    );
     expect(page.objects.moved).toMatchObject({
       contexts: ["area"],
       createdAt: 10,
@@ -340,8 +344,91 @@ describe("ObjectStore", () => {
     expect(() => store.updateType("nope", {})).toThrow(ObjectStoreError);
   });
 
+  it("moves a placed object to the trash, hides it and restores it", () => {
+    store.savePage(
+      "project",
+      doc(block("t1", "task", "片付ける", block("inner", "task", "中"))),
+      10,
+    );
+    store.savePage(DAILY, doc(paragraph("p", ref("t1"))), 11);
+    store.trashObject("t1", 20);
+    // 置かれていた文書の本文から外れる。中のObjectは生きている。
+    expect(body(store.loadPage("project").doc).content).toEqual([]);
+    expect(store.getObject("inner").title).toBe("中");
+    expect(() => store.getObject("t1")).toThrow(ObjectStoreError);
+    expect(store.search("片付", null).map((o) => o.id)).toEqual([]);
+    expect(store.loadPage(DAILY).objects.t1).toBeUndefined();
+    expect(
+      store.timeline("project").map((e) => e.kind === "object" && e.object.id),
+    ).not.toContain("t1");
+    expect(store.trash().map((o) => o.id)).toEqual(["t1"]);
+    expect(() => store.purgeObject("task")).toThrow(ObjectStoreError);
+
+    expect(store.restoreObject("t1")).toMatchObject({
+      contexts: ["project"],
+      createdAt: 10,
+    });
+    expect(store.trash()).toEqual([]);
+    // 戻したObjectの本文には、中のObjectが置かれたまま。
+    expect(body(store.loadPage("t1").doc).content?.[0]).toMatchObject({
+      type: "objectBlock",
+      attrs: { objectId: "inner" },
+    });
+  });
+
+  it("restores a trashed object placed again by a save and purges the trash", () => {
+    store.savePage(DAILY, doc(block("t1", "task", "a")), 10);
+    store.addContext("t1", "area");
+    store.trashObject("t1", 11);
+    // 古い画面の内容で上書きすると、ゴミ箱から戻る。Contextはそのまま。
+    store.savePage(DAILY, doc(block("t1", "task", "a")), 12);
+    expect(store.getObject("t1").contexts).toEqual(["area"]);
+
+    store.trashObject("t1", 13);
+    store.trashObject("other", 14);
+    store.purgeObject("t1");
+    expect(store.trash().map((o) => o.id)).toEqual(["other"]);
+    store.emptyTrash();
+    expect(store.trash()).toEqual([]);
+    expect(() => store.restoreObject("other")).toThrow(ObjectStoreError);
+  });
+
+  it("deletes a user-defined type only when nothing uses it", () => {
+    store.savePage(
+      DAILY,
+      doc(block("mtg", "会議", "定例"), block("one", "1on1", "面談")),
+      10,
+    );
+    store.updateType("会議", {
+      fields: [{ id: "place", name: "場所", kind: "text" }],
+    });
+    store.updateType("1on1", { extends: "会議" });
+    const [taskView] = store.types().find((t) => t.name === "task")!.views;
+    store.updateType("task", {
+      views: [{ ...taskView!, nestTypes: ["task", "会議"] }],
+    });
+    expect(() => store.deleteType("task")).toThrow(TypeError);
+    expect(() => store.deleteType("会議")).toThrow("1件");
+    store.trashObject("mtg", 11);
+    // ゴミ箱の分も数える。
+    expect(() => store.deleteType("会議")).toThrow("1件");
+    store.purgeObject("mtg");
+    expect(() => store.deleteType("会議")).toThrow("#1on1");
+    store.updateType("1on1", { extends: null });
+    store.deleteType("会議");
+    expect(store.types().map((t) => t.name)).not.toContain("会議");
+    expect(
+      store.types().find((t) => t.name === "task")!.views[0]!.nestTypes,
+    ).toEqual(["task"]);
+    expect(() => store.deleteType("会議")).toThrow(ObjectStoreError);
+  });
+
   it("stores control fields, inherits fields and delivers field mentions", () => {
-    store.savePage(DAILY, doc(block("mtg", "会議", "定例")), 10);
+    store.savePage(
+      DAILY,
+      doc(block("mtg", "会議", "定例"), block("one", "1on1", "面談")),
+      10,
+    );
     store.updateType("会議", {
       fields: [
         { id: "when", name: "日付", kind: "date" },
@@ -544,6 +631,42 @@ describe("ObjectStore", () => {
       14,
     );
     expect(store.getObject("t2").contexts).toEqual(["task"]);
+  });
+
+  it("exports the Daily and objects as Markdown with front matter", () => {
+    store.updateType("task", {
+      fields: [{ id: "due", name: "期限", kind: "text" }],
+    });
+    store.savePage(
+      "project",
+      doc(block("t1", "task", "やる/こと", field("due", text("明日")))),
+      10,
+    );
+    store.trashObject("memo", 11);
+    const files = store.exportMarkdown();
+    const byPath = new Map(files.map((file) => [file.path, file.text]));
+    expect([...byPath.keys()]).not.toContain("objects/memo/memo-memo.md");
+    expect(byPath.get("objects/task/やる_こと-t1.md")).toBe(
+      [
+        "---",
+        'id: "t1"',
+        'type: "task"',
+        `created: ${new Date(10).toISOString()}`,
+        "done: false",
+        'contexts: ["project"]',
+        '"期限": "明日"',
+        "---",
+        "",
+        "# やる/こと",
+        "",
+      ].join("\n"),
+    );
+    expect(byPath.get("objects/project/project-project.md")).toContain(
+      "- [ ] [やる/こと](../../objects/task/%E3%82%84%E3%82%8B_%E3%81%93%E3%81%A8-t1.md)",
+    );
+    expect(byPath.get("daily/2026-11-12.md")).toBe(
+      "# 2026-11-12\n\n[task](../objects/task/task-task.md) を進める\n\n関係ない段落\n",
+    );
   });
 
   it("refuses contexts that would create a cycle and unknown hosts", () => {

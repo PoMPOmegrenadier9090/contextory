@@ -6,6 +6,7 @@ import fastifyStatic from "@fastify/static";
 import { ObjectStore, ObjectStoreError } from "@pkm/storage-node";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 
+import { rotateBackup } from "./backups.js";
 import { registerObjectRoutes } from "./object-api.js";
 
 const gzipAsync = promisify(gzip);
@@ -31,6 +32,8 @@ export interface OpenServerAppOptions {
   readonly objectStorePath: string;
   readonly logger?: boolean | FastifyBaseLogger;
   readonly webRoot?: string;
+  /** 起動時と1日1回、DBの複製を置くフォルダ。省略すると作らない。 */
+  readonly backupDir?: string;
 }
 
 export const openServerApp = async (
@@ -109,7 +112,23 @@ export const openServerApp = async (
     });
   });
   const objects = new ObjectStore(options.objectStorePath);
-  app.addHook("onClose", () => {
+  const { backupDir } = options;
+  let backups: Promise<void> = Promise.resolve();
+  let timer: NodeJS.Timeout | undefined;
+  if (backupDir !== undefined) {
+    const run = (): void => {
+      backups = rotateBackup(objects, backupDir).catch((error: unknown) =>
+        app.log.error(error, "Backup failed"),
+      );
+    };
+    run();
+    timer = setInterval(run, 24 * 60 * 60 * 1000);
+    timer.unref();
+  }
+  app.addHook("onClose", async () => {
+    clearInterval(timer);
+    // 書いている途中の複製を待ってから閉じる。
+    await backups;
     objects.close();
   });
   registerObjectRoutes(app, objects);

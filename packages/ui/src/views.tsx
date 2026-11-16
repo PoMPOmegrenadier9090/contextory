@@ -98,6 +98,8 @@ export interface ViewTabsProps {
   /** Objectへの書き込みを保存の列に並べる。済んだら開いている文書も読み直す。 */
   readonly act: (task: () => Promise<unknown>) => void;
   readonly patchType: (name: string, patch: ObjectTypePatch) => void;
+  /** 確かめてからゴミ箱へ移す。 */
+  readonly trash: (object: ObjectSummary) => void;
 }
 
 /** 種別のページとObjectのページに並べる、Viewのタブと中身。 */
@@ -113,6 +115,7 @@ export const ViewTabs = ({
   open,
   act,
   patchType,
+  trash,
 }: ViewTabsProps): React.JSX.Element => {
   const views = owner.views.filter((candidate) => candidate.scope === scope);
   /** 前回開いていたView。種別とページの範囲ごとに覚える。 */
@@ -938,6 +941,15 @@ export const ViewTabs = ({
           onClick={() => open(object.id)}
         >
           ↗
+        </button>
+        <button
+          type="button"
+          className="od-cell-open"
+          aria-label={`${object.title}をゴミ箱へ移す`}
+          title="ゴミ箱へ移す"
+          onClick={() => trash(object)}
+        >
+          ×
         </button>
       </span>
     );

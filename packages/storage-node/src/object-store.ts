@@ -38,7 +38,9 @@ import {
   type ViewRow,
 } from "@pkm/core";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 5;
+import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
+
+export const OBJECT_STORE_SCHEMA_VERSION = 6;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
@@ -66,6 +68,8 @@ interface ObjectRow {
   readonly done: number;
   readonly created_at: number;
   readonly updated_at: number;
+  /** ゴミ箱へ移した日時。生きているObjectはnull */
+  readonly deleted_at: number | null;
 }
 
 interface MentionRow {
@@ -81,10 +85,25 @@ interface MentionRow {
 const nodes = (json: string): readonly DocNode[] =>
   JSON.parse(json) as readonly DocNode[];
 
+// ゴミ箱のObjectは、配下を集める経路に含めない。
 const REACH = `WITH RECURSIVE reach(id) AS (
   SELECT ? UNION
   SELECT c.object_id FROM contexts c JOIN reach r ON c.target_id = r.id
+  JOIN objects o ON o.id = c.object_id AND o.deleted_at IS NULL
 )`;
+
+/** 本文から、idのObjectの埋め込みを取り除く。 */
+const withoutEmbed = (body: readonly DocNode[], id: string): DocNode[] =>
+  body
+    .filter(
+      (node) =>
+        node.type !== "objectEmbed" || String(node.attrs?.objectId) !== id,
+    )
+    .map((node) =>
+      node.content
+        ? { ...node, content: withoutEmbed(node.content, id) }
+        : node,
+    );
 
 /**
  * 次期のObject保存層。objects・documents・contextsが正本で、
@@ -211,6 +230,11 @@ export class ObjectStore {
           this.setViews(name, this.defaultViews());
         this.database.pragma("user_version = 5");
       })();
+    if (version < 6)
+      this.database.transaction(() => {
+        this.database.exec("ALTER TABLE objects ADD COLUMN deleted_at INTEGER");
+        this.database.pragma("user_version = 6");
+      })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
   }
 
@@ -220,10 +244,30 @@ export class ObjectStore {
 
   /* ---------- rows ---------- */
 
+  /** 生きているObjectの行。ゴミ箱のObjectは無いものとして扱う。 */
   private row(id: string): ObjectRow | undefined {
     return this.database
-      .prepare("SELECT * FROM objects WHERE id = ?")
+      .prepare("SELECT * FROM objects WHERE id = ? AND deleted_at IS NULL")
       .get(id) as ObjectRow | undefined;
+  }
+
+  private trashedRow(id: string): ObjectRow {
+    const row = this.database
+      .prepare("SELECT * FROM objects WHERE id = ? AND deleted_at IS NOT NULL")
+      .get(id) as ObjectRow | undefined;
+    if (!row)
+      throw new ObjectStoreError(
+        "OBJECT_NOT_FOUND",
+        `Object not in trash: ${id}`,
+      );
+    return row;
+  }
+
+  /** ゴミ箱の分も含めて、idの行があるか。 */
+  private exists(id: string): boolean {
+    return Boolean(
+      this.database.prepare("SELECT 1 FROM objects WHERE id = ?").get(id),
+    );
   }
 
   private requireRow(id: string): ObjectRow {
@@ -303,7 +347,8 @@ export class ObjectStore {
         `INSERT INTO objects (id, type, title, title_text, body, done, created_at, updated_at)
          VALUES (@id, @type, @title, '', @body, @done, @now, @now)
          ON CONFLICT(id) DO UPDATE SET
-           type = @type, title = @title, body = @body, done = @done, updated_at = @now`,
+           type = @type, title = @title, body = @body, done = @done, updated_at = @now,
+           deleted_at = NULL`,
       )
       .run({
         id,
@@ -629,7 +674,8 @@ export class ObjectStore {
         const parentId = split.parents[id] ?? (host ? hostId : null);
         // 親も今回初めて現れた場合に備え、親から先に作る。
         if (parentId !== null && parentId !== hostId) ensure(parentId);
-        const isNew = !this.row(id);
+        // ゴミ箱にあったObjectは、文書に置いたことで戻す。Contextはそのまま。
+        const isNew = !this.exists(id);
         this.upsertObject(
           id,
           normalizeObjectType(content.attrs.type) ?? "task",
@@ -670,7 +716,6 @@ export class ObjectStore {
           .run(hostId, body, now);
       this.reindex(hostId, now);
       for (const id of saved) this.reindex(id, now);
-
     })();
     return this.loadPage(hostId);
   }
@@ -692,7 +737,7 @@ export class ObjectStore {
     now: number,
   ): ObjectSummary {
     this.database.transaction(() => {
-      if (this.row(input.id)) throw new TypeError("Object already exists");
+      if (this.exists(input.id)) throw new TypeError("Object already exists");
       const parent =
         input.parentId === null ? undefined : this.row(input.parentId);
       this.upsertObject(
@@ -739,6 +784,78 @@ export class ObjectStore {
     return this.getObject(id);
   }
 
+  /**
+   * Objectをゴミ箱へ移す。置かれている文書の本文からは外す。
+   * 行・Field・Context・言及の索引は、戻せるように残す。
+   */
+  trashObject(id: string, now: number): ObjectSummary {
+    this.database.transaction(() => {
+      this.requireRow(id);
+      for (const hostId of this.database
+        .prepare("SELECT host_id FROM placements WHERE object_id = ?")
+        .pluck()
+        .all(id) as string[]) {
+        // ゴミ箱にあるhostの本文からも外す。戻したときに中身の無い埋め込みを残さない。
+        const table = this.exists(hostId) ? "objects" : "documents";
+        const body = this.database
+          .prepare(`SELECT body FROM ${table} WHERE id = ?`)
+          .pluck()
+          .get(hostId) as string | undefined;
+        if (body !== undefined)
+          this.database
+            .prepare(
+              `UPDATE ${table} SET body = ?, updated_at = ? WHERE id = ?`,
+            )
+            .run(JSON.stringify(withoutEmbed(nodes(body), id)), now, hostId);
+        this.database
+          .prepare("DELETE FROM placements WHERE host_id = ? AND object_id = ?")
+          .run(hostId, id);
+      }
+      this.database
+        .prepare("UPDATE objects SET deleted_at = ? WHERE id = ?")
+        .run(now, id);
+    })();
+    return this.summary(this.trashedRow(id));
+  }
+
+  /** ゴミ箱から戻す。置き場所の無いObjectとして戻る。 */
+  restoreObject(id: string): ObjectSummary {
+    this.trashedRow(id);
+    this.database
+      .prepare("UPDATE objects SET deleted_at = NULL WHERE id = ?")
+      .run(id);
+    return this.getObject(id);
+  }
+
+  /** ゴミ箱にあるObjectを完全に削除する。元に戻せない。 */
+  purgeObject(id: string): void {
+    this.database.transaction(() => {
+      this.trashedRow(id);
+      this.deleteObject(id);
+    })();
+  }
+
+  /** ゴミ箱のObject。移した日時の新しい順。 */
+  trash(): ObjectSummary[] {
+    return (
+      this.database
+        .prepare(
+          "SELECT * FROM objects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+        )
+        .all() as ObjectRow[]
+    ).map((row) => this.summary(row));
+  }
+
+  emptyTrash(): void {
+    this.database.transaction(() => {
+      for (const id of this.database
+        .prepare("SELECT id FROM objects WHERE deleted_at IS NOT NULL")
+        .pluck()
+        .all() as string[])
+        this.deleteObject(id);
+    })();
+  }
+
   addContext(id: string, targetId: string): ObjectSummary {
     this.database.transaction(() => {
       this.requireRow(id);
@@ -768,7 +885,7 @@ export class ObjectStore {
     const rows = this.database
       .prepare(
         `SELECT * FROM objects
-         WHERE title_text LIKE ? ESCAPE '\\' AND id IS NOT ?
+         WHERE title_text LIKE ? ESCAPE '\\' AND id IS NOT ? AND deleted_at IS NULL
            AND (type != 'memo' OR ? != '')
          ORDER BY created_at DESC LIMIT ?`,
       )
@@ -851,7 +968,9 @@ export class ObjectStore {
         anchor === null
           ? (
               this.database
-                .prepare("SELECT * FROM objects WHERE type = ?")
+                .prepare(
+                  "SELECT * FROM objects WHERE type = ? AND deleted_at IS NULL",
+                )
                 .all(type) as ObjectRow[]
             ).map((row) => ({
               kind: "object",
@@ -881,7 +1000,7 @@ export class ObjectStore {
       this.database
         .prepare(
           `SELECT o.* FROM objects o JOIN contexts c ON c.object_id = o.id
-           WHERE c.target_id = ?`,
+           WHERE c.target_id = ? AND o.deleted_at IS NULL`,
         )
         .all(id) as ObjectRow[];
     const key = ({ row, values }: Item, by: string): string | number =>
@@ -923,7 +1042,9 @@ export class ObjectStore {
       anchor === null
         ? (
             this.database
-              .prepare("SELECT * FROM objects WHERE type = ?")
+              .prepare(
+                "SELECT * FROM objects WHERE type = ? AND deleted_at IS NULL",
+              )
               .all(type) as ObjectRow[]
           ).filter(
             // 階層では、同じ種別のObjectの配下にあるものを、その下に出す。
@@ -1141,12 +1262,150 @@ export class ObjectStore {
     return this.types().find((type) => type.name === current)!;
   }
 
+  /**
+   * ユーザーが作った種別を消す。その種別のObject（ゴミ箱の分も含む）や、
+   * 継承している種別が残っていれば断る。Field・View・ほかのViewの指定も消す。
+   */
+  deleteType(name: ObjectType): void {
+    this.database.transaction(() => {
+      if (
+        !this.database.prepare("SELECT 1 FROM types WHERE name = ?").get(name)
+      )
+        throw new ObjectStoreError(
+          "OBJECT_NOT_FOUND",
+          `Type not found: ${name}`,
+        );
+      const builtins: readonly string[] = OBJECT_TYPES;
+      if (builtins.includes(name))
+        throw new TypeError("built-in types cannot be deleted");
+      const count = this.database
+        .prepare("SELECT count(*) FROM objects WHERE type = ?")
+        .pluck()
+        .get(name) as number;
+      if (count)
+        throw new TypeError(
+          `この種別のObjectが${count}件残っています（ゴミ箱の分を含む）`,
+        );
+      const children = this.database
+        .prepare("SELECT name FROM types WHERE extends = ?")
+        .pluck()
+        .all(name) as string[];
+      if (children.length)
+        throw new TypeError(
+          `${children.map((child) => `#${child}`).join("、")}がこの種別を継承しています`,
+        );
+      for (const sql of [
+        "DELETE FROM fields WHERE type = ?",
+        "DELETE FROM views WHERE owner = ?",
+        "DELETE FROM types WHERE name = ?",
+      ])
+        this.database.prepare(sql).run(name);
+      // ほかの種別のViewが、この種別で絞っていれば外す。
+      for (const { id, config } of this.database
+        .prepare("SELECT id, config FROM views")
+        .all() as { id: string; config: string }[]) {
+        const view = parseView(JSON.parse(config));
+        if (view.type !== name && !view.nestTypes.includes(name)) continue;
+        this.database.prepare("UPDATE views SET config = ? WHERE id = ?").run(
+          JSON.stringify({
+            ...view,
+            type: view.type === name ? null : view.type,
+            nestTypes: view.nestTypes.filter((type) => type !== name),
+          }),
+          id,
+        );
+      }
+    })();
+  }
+
+  /**
+   * Markdownで書き出すファイルの一覧。DailyとObjectごとに1ファイル。
+   * Field・Context・作成日時は先頭のYAMLに書く。ゴミ箱のObjectは含めない。
+   */
+  exportMarkdown(): { readonly path: string; readonly text: string }[] {
+    const rows = this.database
+      .prepare(
+        "SELECT * FROM objects WHERE deleted_at IS NULL ORDER BY created_at",
+      )
+      .all() as ObjectRow[];
+    const checkbox = new Set(
+      this.types()
+        .filter((type) => type.checkbox)
+        .map((type) => type.name),
+    );
+    const titles = new Map(
+      rows.map((row) => [row.id, this.summary(row).title]),
+    );
+    const paths = new Map(
+      rows.map((row) => [
+        row.id,
+        `objects/${safeName(row.type)}/${safeName(titles.get(row.id)!)}-${row.id}.md`,
+      ]),
+    );
+    const linkFrom =
+      (path: string): MarkdownLookup =>
+      (id) => {
+        const target = paths.get(id);
+        const row = target === undefined ? undefined : this.row(id);
+        return row && target
+          ? {
+              title: titles.get(id)!,
+              path: "../".repeat(path.split("/").length - 1) + target,
+              done: checkbox.has(row.type) ? row.done === 1 : null,
+            }
+          : undefined;
+      };
+    const yaml = (value: unknown): string => JSON.stringify(value);
+    const files = rows.map((row) => {
+      const path = paths.get(row.id)!;
+      const fields = this.fieldContents(row).filter(
+        (field) => field.kind !== "context" && field.value.length,
+      );
+      const front = [
+        "---",
+        `id: ${yaml(row.id)}`,
+        `type: ${yaml(row.type)}`,
+        `created: ${new Date(row.created_at).toISOString()}`,
+        ...(checkbox.has(row.type) ? [`done: ${row.done === 1}`] : []),
+        `contexts: [${this.contextsOf(row.id)
+          .map((id) => yaml(titles.get(id) ?? id))
+          .join(", ")}]`,
+        ...fields.map(
+          (field) => `${yaml(field.name)}: ${yaml(this.text(field.value))}`,
+        ),
+        "---",
+      ];
+      const body = toMarkdown(nodes(row.body), linkFrom(path));
+      return {
+        path,
+        text: `${[...front, "", `# ${titles.get(row.id)!}`, "", body].join("\n").trimEnd()}\n`,
+      };
+    });
+    for (const { id, body } of this.database
+      .prepare("SELECT id, body FROM documents ORDER BY id")
+      .all() as { id: string; body: string }[]) {
+      const date = id.slice("daily:".length);
+      const path = `daily/${date}.md`;
+      const text = toMarkdown(nodes(body), linkFrom(path));
+      if (text) files.push({ path, text: `# ${date}\n\n${text}\n` });
+    }
+    return files;
+  }
+
+  /** 書き込み中でも整ったDBの複製を作る。 */
+  async backup(path: string): Promise<void> {
+    mkdirSync(dirname(path), { recursive: true });
+    await this.database.backup(path);
+  }
+
   /** 画面の入口に出すObjectと、指定期間に作成したObjectとMemo。 */
   overview(from: number, to = Number.MAX_SAFE_INTEGER): ObjectOverview {
     const select = (where: string, ...params: unknown[]): ObjectSummary[] =>
       (
         this.database
-          .prepare(`SELECT * FROM objects WHERE ${where}`)
+          .prepare(
+            `SELECT * FROM objects WHERE deleted_at IS NULL AND ${where}`,
+          )
           .all(...params) as ObjectRow[]
       ).map((row) => this.summary(row));
     const recent = select(
@@ -1178,10 +1437,12 @@ export class ObjectStore {
       }
       if (nested) continue;
       const host = hostId === null ? undefined : this.row(hostId);
+      // ゴミ箱のObjectの中にあるMemoは、置き場所が無いものとして出す。
+      const placed = host !== undefined || DOCUMENT_ID.test(hostId ?? "");
       memos.push({
         object,
-        hostId,
-        hostTitle: host ? this.summary(host).title : hostId ? "Daily" : "",
+        hostId: placed ? hostId : null,
+        hostTitle: host ? this.summary(host).title : placed ? "Daily" : "",
       });
     }
     return {
@@ -1204,6 +1465,7 @@ export class ObjectStore {
       while (queue.length) {
         const path = queue.shift()!;
         for (const next of this.contextsOf(path.at(-1)!)) {
+          if (!this.row(next)) continue;
           if (next === targetId) return path.slice(1);
           if (seen.has(next)) continue;
           seen.add(next);
@@ -1247,6 +1509,8 @@ export class ObjectStore {
           : [row.target_id, ...pathFrom(row.target_id)],
       );
       const host = this.row(row.host_id);
+      // ゴミ箱のObjectの中での言及は出さない。
+      if (!host && !DOCUMENT_ID.test(row.host_id)) continue;
       if (row.unit_kind === "object" || row.unit_kind === "field") {
         const field =
           row.unit_kind === "field"
