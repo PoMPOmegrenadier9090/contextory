@@ -114,7 +114,7 @@ describe("ObjectStore", () => {
     expect(page.objects.new?.contexts).toEqual(["project"]);
   });
 
-  it("keeps contexts on later saves and keeps objects removed from the document", () => {
+  it("keeps contexts on later saves and trashes objects removed from the document", () => {
     const tree = doc(block("new", "task", "a", block("child", "task", "b")));
     store.savePage(DAILY, tree, 10);
     store.addContext("new", "project");
@@ -124,6 +124,10 @@ describe("ObjectStore", () => {
       createdAt: 10,
     });
     store.savePage(DAILY, doc(), 30);
+    // 外れたObjectはゴミ箱へ移る。取り消しで戻すと、作成日時とContextが残る。
+    expect(store.trash().map((o) => o.id).sort()).toEqual(["child", "new"]);
+    store.savePage(DAILY, tree, 40);
+    expect(store.trash()).toEqual([]);
     expect(store.getObject("new")).toMatchObject({
       contexts: ["project"],
       createdAt: 10,

@@ -645,8 +645,8 @@ export class ObjectStore {
 
   /**
    * 編集した文書木を保存する。Object単位へ分け、初めて現れたObjectは
-   * 置かれた場所からContextを継承して作る。この文書から外れたObjectは消さず、
-   * 置き場所の無いObjectとして残す。
+   * 置かれた場所からContextを継承して作る。この文書から外れ、ほかのどこにも
+   * 置かれていないObjectはゴミ箱へ移す。
    */
   savePage(
     hostId: string,
@@ -666,6 +666,7 @@ export class ObjectStore {
       const host = this.row(hostId);
       this.hostBody(hostId); // 存在しないhostならここで失敗させる
       const split = splitDocument(doc);
+      const previous = this.placedIds(hostId);
       const saved = new Set<string>();
       const ensure = (id: string): void => {
         const content = split.objects[id];
@@ -716,6 +717,22 @@ export class ObjectStore {
           .run(hostId, body, now);
       this.reindex(hostId, now);
       for (const id of saved) this.reindex(id, now);
+
+      // 外れてほかのどこにも置かれていないObjectは、ゴミ箱へ移す。
+      // 取り消しや貼り付けで戻れば、上のupsertObjectがゴミ箱から戻す。
+      const removed = previous.filter((id) => !saved.has(id));
+      const placedElsewhere = this.database.prepare(
+        `SELECT 1 FROM placements WHERE object_id = ?
+         AND host_id NOT IN (SELECT value FROM json_each(?))`,
+      );
+      const removedJson = JSON.stringify(removed);
+      for (const id of removed)
+        if (!placedElsewhere.get(id, removedJson))
+          this.database
+            .prepare(
+              "UPDATE objects SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+            )
+            .run(now, id);
     })();
     return this.loadPage(hostId);
   }
