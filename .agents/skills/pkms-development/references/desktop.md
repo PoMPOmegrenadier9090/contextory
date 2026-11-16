@@ -22,9 +22,9 @@ Electron検証とpackagingの終了後、失敗した場合も `corepack pnpm re
 3. `/Applications` と同じfilesystem内の一意なステージング先へ `/usr/bin/ditto release/Contextory.app STAGED_APP` でコピーする。コピーの完了と `codesign --verify --deep --strict STAGED_APP`、bundle IDを確認してから切り替える。ソースからdestinationへ直接重ね書きしない。
 4. 旧 `/Applications/Contextory.app` を同じ親ディレクトリの一意なbackup名へrenameし、ステージング済みアプリを `/Applications/Contextory.app` へrenameする。切替に失敗したら旧アプリを元の名前へ戻す。初回インストールならbackupは不要。
 5. インストール先で再度署名を検証し、配布物と一致することを確認する。同じversionが繰り返し使われるため、versionだけで新旧を判定せず、renderer出力とmainのファイルhash等も比較する。
-6. インストール先の実行ファイル `Contents/MacOS/Electron` を `PKM_ELECTRON_SMOKE=1`、`ELECTRON_RUN_AS_NODE` を空にした環境で起動し、終了コードとrenderer smoke成功を確認する。現在のsmokeモードは既存Vault／接続設定を読み込まない。timeoutを設け、動作確認で本物のVaultへ書き込まない。
+6. インストール先の実行ファイル `Contents/MacOS/Electron` を `PKM_ELECTRON_SMOKE=1`、`ELECTRON_RUN_AS_NODE` を空にした環境で起動し、終了コードとrenderer smoke成功を確認する。smokeモードはメモリ上のDBを使い、既存の`objects.sqlite`を開かない。timeoutを設ける。
 7. 旧アプリが動いていた場合は `open /Applications/Contextory.app` で通常起動に戻し、新しいプロセスがインストール先から起動したことを確認する。ユーザーが明示的に通常起動も求めた場合も行う。
 
-署名・起動確認が失敗した場合は新アプリを退避し、backupを元の名前に戻す。成功後は、この作業で作ったステージング／backupだけを片付ける。Vault、`~/Library/Application Support`、認証情報や端末設定は削除しない。成功してからmainへpushする。
+署名・起動確認が失敗した場合は新アプリを退避し、backupを元の名前に戻す。成功後は、この作業で作ったステージング／backupだけを片付ける。`objects.sqlite`を含む`~/Library/Application Support`、認証情報や端末設定は削除しない。成功してからmainへpushする。
 
 sandboxの書込み権限が足りない場合は `/Applications/Contextory.app` の置換目的を明示して昇格を要求する。ユーザーの継続的な承認は追加の確認会話を不要にするが、ツールによる権限審査を省略しない。

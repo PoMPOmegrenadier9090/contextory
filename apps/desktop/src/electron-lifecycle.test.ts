@@ -28,27 +28,27 @@ beforeEach(() => {
   electron.BrowserWindow.getAllWindows.mockReturnValue([]);
 });
 
-const setup = (closeVault = vi.fn(() => Promise.resolve())) => {
+const setup = (closeStore = vi.fn(() => Promise.resolve())) => {
   const createWindow = vi.fn(() => Promise.resolve({} as BrowserWindow));
   const unregisterIpc = vi.fn();
-  registerDesktopLifecycle(createWindow, closeVault, unregisterIpc);
-  return { createWindow, closeVault, unregisterIpc };
+  registerDesktopLifecycle(createWindow, closeStore, unregisterIpc);
+  return { createWindow, closeStore, unregisterIpc };
 };
 
 describe("desktop quit lifecycle", () => {
-  it("keeps the Vault and IPC available when a window cancels quitting", async () => {
+  it("keeps the store and IPC available when a window cancels quitting", async () => {
     const lifecycle = setup();
     events.emit("before-quit", { preventDefault: vi.fn() });
     // A cancelled window close never reaches will-quit. On macOS the user
     // can later close the window and activate the still-running app again.
     events.emit("activate");
     await tick();
-    expect(lifecycle.closeVault).not.toHaveBeenCalled();
+    expect(lifecycle.closeStore).not.toHaveBeenCalled();
     expect(lifecycle.unregisterIpc).not.toHaveBeenCalled();
     expect(lifecycle.createWindow).toHaveBeenCalledOnce();
   });
 
-  it("drains the Vault once and prevents reopening windows during shutdown", async () => {
+  it("closes the store once and prevents reopening windows during shutdown", async () => {
     let finishClose!: () => void;
     const closing = new Promise<void>((resolve) => {
       finishClose = resolve;
@@ -62,7 +62,7 @@ describe("desktop quit lifecycle", () => {
     await tick();
     expect(first.preventDefault).toHaveBeenCalledOnce();
     expect(repeated.preventDefault).toHaveBeenCalledOnce();
-    expect(lifecycle.closeVault).toHaveBeenCalledOnce();
+    expect(lifecycle.closeStore).toHaveBeenCalledOnce();
     expect(lifecycle.createWindow).not.toHaveBeenCalled();
     expect(electron.app.quit).not.toHaveBeenCalled();
     expect(lifecycle.unregisterIpc).not.toHaveBeenCalled();
@@ -80,14 +80,17 @@ describe("desktop quit lifecycle", () => {
   });
 
   it("reports cleanup failures and still lets the process terminate", async () => {
-    const error = new Error("Vault close failed");
+    const error = new Error("Store close failed");
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const lifecycle = setup(vi.fn(() => Promise.reject(error)));
       events.emit("will-quit", { preventDefault: vi.fn() });
       await tick();
       await tick();
-      expect(log).toHaveBeenCalledWith("Vault could not be closed", error);
+      expect(log).toHaveBeenCalledWith(
+        "Object store could not be closed",
+        error,
+      );
       expect(electron.app.quit).toHaveBeenCalledOnce();
       events.emit("quit");
       expect(lifecycle.unregisterIpc).toHaveBeenCalledOnce();

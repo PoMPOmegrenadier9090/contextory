@@ -1,59 +1,46 @@
-import { openDesktopMcpHost } from "@pkm/mcp";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  powerMonitor,
-  protocol,
-  shell,
-} from "electron";
+import { createHttpObjectClient, type ObjectClient } from "@pkm/core";
+import { ObjectStore } from "@pkm/storage-node";
+import { app, BrowserWindow, Menu, safeStorage, shell } from "electron";
 
 import { registerDesktopIpc } from "./electron-ipc.js";
 import { registerDesktopLifecycle } from "./electron-lifecycle.js";
-import { DesktopVaultController } from "./vault-controller.js";
 import { externalWebUrl } from "./external-link.js";
-import { openLocalVault } from "@pkm/storage-node";
-import { FileVaultPreferences } from "./vault-preferences.js";
+import { localObjectClient } from "./local-object-client.js";
+import {
+  accessHeaders,
+  connectionFile,
+  parseServerConnection,
+  type ServerConnection,
+} from "./server-connection.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
-const controller = new DesktopVaultController(
-  async () => {
-    const result = await dialog.showOpenDialog({
-      title: "既存Vaultまたは新規Vault用の空フォルダを選択",
-      properties: ["openDirectory", "createDirectory"],
-    });
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  },
-  openLocalVault,
-  {},
-  process.env.PKM_ELECTRON_SMOKE === "1"
-    ? undefined
-    : new FileVaultPreferences(() =>
-        join(app.getPath("userData"), "vault-preferences.json"),
-      ),
-  process.env.PKM_DESKTOP_MCP_ENABLED === "1"
-    ? (service, root) =>
-        openDesktopMcpHost(
-          service,
-          root,
-          join(app.getPath("userData"), "mcp-connection.json"),
-        )
-    : undefined,
-);
-const unregisterIpc = registerDesktopIpc(controller, (channel, payload) => {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed() && !window.webContents.isDestroyed())
-      window.webContents.send(channel, payload);
-  }
-});
 
-const refreshVault = (): void => {
-  void controller.api.refreshVault().catch((error: unknown) => {
-    console.error("Vault refresh failed", error);
+const loadPage = async (window: BrowserWindow, page: string) => {
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const external = externalWebUrl(url);
+    if (external !== null)
+      void shell
+        .openExternal(external)
+        .catch((error: unknown) =>
+          console.error("External link could not be opened", error),
+        );
+    return { action: "deny" };
   });
+  window.webContents.on("will-navigate", (event) => event.preventDefault());
+  const developmentUrl = process.env.PKM_RENDERER_URL;
+  if (developmentUrl === undefined)
+    await window.loadFile(join(currentDirectory, "../dist-renderer", page));
+  else await window.loadURL(new URL(page, developmentUrl).href);
+};
+
+const webPreferences = {
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+  preload: join(currentDirectory, "preload.cjs"),
 };
 
 const createWindow = async (): Promise<BrowserWindow> => {
@@ -69,59 +56,113 @@ const createWindow = async (): Promise<BrowserWindow> => {
           trafficLightPosition: { x: 12, y: 14 },
         }
       : {}),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: join(currentDirectory, "preload.cjs"),
-    },
+    webPreferences,
   });
-  window.on("focus", refreshVault);
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    const external = externalWebUrl(url);
-    if (external !== null)
-      void shell
-        .openExternal(external)
-        .catch((error: unknown) =>
-          console.error("External link could not be opened", error),
-        );
-    return { action: "deny" };
-  });
-  window.webContents.on("will-navigate", (event) => event.preventDefault());
-
-  const developmentUrl = process.env.PKM_RENDERER_URL;
-  if (developmentUrl === undefined) {
-    await window.loadFile(
-      join(currentDirectory, "../dist-renderer/index.html"),
-    );
-  } else {
-    await window.loadURL(developmentUrl);
-  }
+  await loadPage(window, "index.html");
   return window;
 };
 
+let connectionWindow: BrowserWindow | null = null;
+const openConnectionWindow = (): void => {
+  if (connectionWindow !== null) return connectionWindow.focus();
+  connectionWindow = new BrowserWindow({
+    width: 520,
+    height: 540,
+    resizable: false,
+    title: "サーバー接続",
+    webPreferences,
+  });
+  connectionWindow.on("closed", () => {
+    connectionWindow = null;
+  });
+  void loadPage(connectionWindow, "connection.html");
+};
+
 await app.whenReady();
-powerMonitor.on("resume", refreshVault);
-protocol.handle("pkm-asset", async (request) => {
-  const url = new URL(request.url);
-  if (url.hostname !== "vault") return new Response(null, { status: 404 });
-  try {
-    const asset = await controller.api.readAsset(
-      decodeURIComponent(url.pathname.slice(1)),
-    );
-    return new Response(new Uint8Array(asset.data), {
-      headers: {
-        "content-type": asset.mimeType,
-        "x-content-type-options": "nosniff",
-      },
+const smoke = process.env.PKM_ELECTRON_SMOKE === "1";
+const objects = new ObjectStore(
+  smoke ? ":memory:" : join(app.getPath("userData"), "objects.sqlite"),
+);
+const local = localObjectClient(objects);
+const settings = connectionFile(
+  join(app.getPath("userData"), "server-connection.json"),
+  safeStorage,
+);
+// smokeは利用中の接続設定を読まない。
+let connection = smoke
+  ? null
+  : await settings.load().catch((error: unknown) => {
+      console.error("Server connection could not be read", error);
+      return null;
     });
-  } catch {
-    return new Response(null, { status: 404 });
-  }
-});
-registerDesktopLifecycle(createWindow, () => controller.close(), unregisterIpc);
+const clientFor = (next: ServerConnection | null): ObjectClient =>
+  next === null
+    ? local
+    : createHttpObjectClient({
+        baseUrl: next.url,
+        headers: accessHeaders(next),
+      });
+let client = clientFor(connection);
+const summary = () =>
+  connection && { url: connection.url, clientId: connection.clientId };
+// 保存先が変わったら、Object画面を新しい保存先で読み直す。
+const switchTo = (next: ServerConnection | null): void => {
+  connection = next;
+  client = clientFor(next);
+  for (const window of BrowserWindow.getAllWindows())
+    if (window !== connectionWindow) window.webContents.reload();
+};
+
+registerDesktopLifecycle(
+  createWindow,
+  () => {
+    objects.close();
+    return Promise.resolve();
+  },
+  registerDesktopIpc({
+    client: () => client,
+    connection: {
+      get: summary,
+      async save(input) {
+        const next = parseServerConnection(input, connection);
+        // 届くことと認証が通ることを確かめてから切り替える。
+        await clientFor(next).types();
+        await settings.save(next);
+        switchTo(next);
+        return { url: next.url, clientId: next.clientId };
+      },
+      async clear() {
+        await settings.clear();
+        switchTo(null);
+      },
+    },
+  }),
+);
+Menu.setApplicationMenu(
+  Menu.buildFromTemplate([
+    {
+      role: "appMenu",
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { label: "サーバー接続…", click: openConnectionWindow },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ]),
+);
 const mainWindow = await createWindow();
-if (process.env.PKM_ELECTRON_SMOKE === "1") {
+if (smoke) {
   const result = (await mainWindow.webContents.executeJavaScript(
     `new Promise((resolve) => {
       const inspect = () => ({
@@ -129,15 +170,12 @@ if (process.env.PKM_ELECTRON_SMOKE === "1") {
         root: document.querySelector('#root') !== null,
         rendered: document.querySelector('#root')?.childElementCount > 0,
         title: document.title,
-        chooseVaultButton: [...document.querySelectorAll('button')]
-          .some((button) => button.textContent?.includes('Vaultを選択')),
+        dailyButton: [...document.querySelectorAll('button')]
+          .some((button) => button.textContent === 'Daily'),
         methods: [
-          'chooseVault', 'restoreVault', 'syncStatus', 'setupSync', 'listEntities', 'listTodos', 'toggleTodo', 'quickOpen', 'searchEntities', 'createEntity',
-          'createAsset', 'openAsset', 'readImage', 'listUnresolvedReferences',
-          'loadEntity', 'saveDraft', 'saveEntity', 'permanentlyDeleteEntity', 'resolveEntityConflict',
-          'listSyncthingConflicts', 'loadSyncthingConflict',
-          'resolveSyncthingConflict',
-          'onVaultChanged'
+          'loadPage', 'savePage', 'searchObjects',
+          'createObject', 'patchObject', 'queryView',
+          'types', 'updateType', 'overview'
         ].every((name) => typeof window.pkm?.[name] === 'function')
       });
       const initial = inspect();
@@ -163,7 +201,7 @@ if (process.env.PKM_ELECTRON_SMOKE === "1") {
     readonly root: boolean;
     readonly rendered: boolean;
     readonly title: string;
-    readonly chooseVaultButton: boolean;
+    readonly dailyButton: boolean;
     readonly methods: boolean;
   };
   if (
@@ -172,7 +210,7 @@ if (process.env.PKM_ELECTRON_SMOKE === "1") {
     !result.root ||
     !result.rendered ||
     result.title !== "Contextory" ||
-    !result.chooseVaultButton ||
+    !result.dailyButton ||
     !result.methods
   ) {
     throw new Error(

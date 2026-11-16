@@ -1,4 +1,4 @@
-const { app, protocol } = require("electron");
+const { app } = require("electron");
 const path = require("node:path");
 const process = require("node:process");
 
@@ -13,13 +13,6 @@ const userData =
     : app.getPath("userData");
 app.setName("Contextory");
 app.setPath("userData", userData);
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "pkm-asset",
-    privileges: { standard: true, secure: true, supportFetchAPI: true },
-  },
-]);
 
 void app
   .whenReady()

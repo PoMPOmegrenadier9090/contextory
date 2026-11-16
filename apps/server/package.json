@@ -5,15 +5,12 @@
   "type": "module",
   "dependencies": {
     "@fastify/static": "^10.1.4",
-    "@pkm/contracts": "workspace:*",
     "@pkm/core": "workspace:*",
     "@pkm/storage-node": "workspace:*",
-    "fastify": "^5.12.5",
-    "@pkm/mcp": "workspace:*"
+    "fastify": "^5.12.5"
   },
   "scripts": {
     "build": "tsc -b",
-    "pkm": "node dist/cli-main.js",
     "server": "corepack pnpm --filter @pkm/web build && corepack pnpm build && node dist/server-main.js"
   }
 }

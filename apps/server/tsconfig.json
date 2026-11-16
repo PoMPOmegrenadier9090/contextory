@@ -11,9 +11,6 @@
     },
     {
       "path": "../../packages/storage-node"
-    },
-    {
-      "path": "../../packages/mcp"
     }
   ],
   "include": ["src/**/*.ts"]

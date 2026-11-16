@@ -89,7 +89,7 @@ const staticWorker: Plugin = {
 export default defineConfig({
   plugins: [react(), compressedAssets, staticWorker],
   resolve: {
-    dedupe: ["react", "react-dom", "@mantine/core", "@mantine/hooks"],
+    dedupe: ["react", "react-dom"],
   },
   build: {
     outDir: "dist-web",

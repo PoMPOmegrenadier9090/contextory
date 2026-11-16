@@ -1,21 +1,17 @@
-import "@mantine/core/styles.css";
-import { AppearanceProvider } from "@pkm/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { ObjectApp } from "@pkm/ui/object-app";
 
-import { createHttpPkmClient } from "./api-client.js";
-import { WebApp } from "./web-app.js";
-import "./web.css";
-import "../../../packages/ui/src/compact.css";
+import { createHttpObjectClient } from "@pkm/core";
+import "../../../packages/ui/src/object-app.css";
+import "../../../packages/editor/src/editor.css";
 
 const root = document.querySelector<HTMLDivElement>("#root");
 if (root === null) throw new Error("Web application root is missing");
 
 createRoot(root).render(
   <StrictMode>
-    <AppearanceProvider>
-      <WebApp client={createHttpPkmClient()} />
-    </AppearanceProvider>
+    <ObjectApp client={createHttpObjectClient()} />
   </StrictMode>,
 );
 

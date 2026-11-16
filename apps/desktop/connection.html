@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <title>サーバー接続</title>
+  </head>
+  <body>
+    <main class="cn">
+      <h1>サーバー接続</h1>
+      <p class="cn-note">
+        Cloudflare Accessのservice
+        tokenで、サーバーのDBを使います。接続しない間は、このMacのDBを使います。
+      </p>
+      <p class="cn-current" id="current"></p>
+      <form id="form">
+        <label
+          >サーバーのURL
+          <input
+            name="url"
+            type="url"
+            placeholder="https://pkm.example.com"
+            required
+        /></label>
+        <label
+          >Client ID <input name="clientId" autocomplete="off" required
+        /></label>
+        <label
+          >Client Secret
+          <input name="clientSecret" type="password" autocomplete="off"
+        /></label>
+        <p class="cn-hint" id="secret-hint" hidden>
+          空のままなら、保存済みのSecretを使います。
+        </p>
+        <p class="cn-error" id="error" role="alert"></p>
+        <div class="cn-actions">
+          <button type="button" id="clear" hidden>このMacのDBに戻す</button>
+          <button type="submit" id="save">接続して保存</button>
+        </div>
+      </form>
+    </main>
+    <script type="module" src="/src/connection.ts"></script>
+  </body>
+</html>

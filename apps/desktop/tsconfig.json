@@ -9,9 +9,6 @@
   },
   "references": [
     {
-      "path": "../../packages/contracts"
-    },
-    {
       "path": "../../packages/core"
     },
     {
@@ -19,9 +16,6 @@
     },
     {
       "path": "../../packages/ui"
-    },
-    {
-      "path": "../../packages/mcp"
     }
   ],
   "include": ["src/**/*.ts", "src/**/*.tsx"]
