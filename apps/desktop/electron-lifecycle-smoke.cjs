@@ -164,7 +164,14 @@ if (typeof electron === "string") {
         const deadline = Date.now() + 10_000;
         while (
           !(await window.webContents.executeJavaScript(
-            `document.body.innerText.includes(${JSON.stringify(`${host}へ保存`)})`,
+            // 保存先は設定の窓に出る。開いて確かめ、閉じておく。
+            `(() => {
+              document.querySelector(".od-nav-settings")?.click();
+              const applied = document.body.innerText.includes(${JSON.stringify(`${host}へ保存`)});
+              [...document.querySelectorAll(".od-dialog-actions button")]
+                .find((button) => button.textContent === "閉じる")?.click();
+              return applied;
+            })()`,
           ))
         ) {
           if (Date.now() > deadline)
