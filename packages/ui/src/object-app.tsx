@@ -331,9 +331,24 @@ export const ObjectApp = ({
   const [shared, setShared] = useState<Readonly<Record<string, unknown>>>({});
   useEffect(() => {
     client.uiState().then(
-      (state) => setShared((local) => ({ ...state, ...local })),
+      (state) => {
+        setShared((local) => ({ ...state, ...local }));
+        // 以前はブラウザーに残していた。まだDBに無いものだけ移し、ブラウザーからは消す。
+        try {
+          for (const key of Object.keys(localStorage)) {
+            const name = key.slice("contextory.".length);
+            if (!/^contextory\.(view|fold):/.test(key)) continue;
+            if (!(name in state))
+              share(name, JSON.parse(localStorage.getItem(key)!) as unknown);
+            localStorage.removeItem(key);
+          }
+        } catch {
+          // 読めなければ、既定の表示で続ける。
+        }
+      },
       (error: unknown) => console.warn("UI state could not be read", error),
     );
+    // 起動時に一度だけ読む。
   }, [client]);
   const share = (key: string, value: unknown): void => {
     setShared((last) => ({ ...last, [key]: value }));
@@ -853,7 +868,7 @@ export const ObjectApp = ({
               ? "保存済み"
               : status === "saving"
                 ? "保存中…"
-                : `保存できませんでした: ${status}`}
+                : `⚠ ${status}`}
           </span>
         </div>
         <div className="od-topbar-actions">

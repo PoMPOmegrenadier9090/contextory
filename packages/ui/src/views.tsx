@@ -936,15 +936,44 @@ export const ViewTabs = ({
         >
           ↗
         </button>
-        <button
-          type="button"
-          className="od-cell-open"
-          aria-label={`${object.title}をゴミ箱へ移す`}
-          title="ゴミ箱へ移す"
-          onClick={() => trash(object)}
+        <Popover
+          className="od-cell-more"
+          label="⋯"
+          ariaLabel={`${object.title}のメニュー`}
         >
-          ×
-        </button>
+          {(close) => (
+            <div className="od-menu">
+              <h3>種別を変える</h3>
+              {types.map((definition) => (
+                <CheckItem
+                  key={definition.name}
+                  checked={object.type === definition.name}
+                  onChange={() => {
+                    close();
+                    if (object.type !== definition.name)
+                      act(() =>
+                        client.patchObject(object.id, {
+                          type: definition.name,
+                        }),
+                      );
+                  }}
+                >
+                  #{typeLabel(definition.name)}
+                </CheckItem>
+              ))}
+              <button
+                type="button"
+                className="od-danger"
+                onClick={() => {
+                  close();
+                  trash(object);
+                }}
+              >
+                ゴミ箱へ移す
+              </button>
+            </div>
+          )}
+        </Popover>
       </span>
     );
   };

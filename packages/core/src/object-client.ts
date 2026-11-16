@@ -44,6 +44,8 @@ export interface ViewResult {
 
 export interface ObjectPatch {
   readonly title?: string;
+  /** 種別を変える。新しい種別に無いFieldの値は消える。 */
+  readonly type?: string;
   readonly done?: boolean;
   /** FieldのIDごとの新しい値。Contextは参照の並びで渡す。 */
   readonly fields?: Readonly<Record<string, readonly DocNode[]>>;

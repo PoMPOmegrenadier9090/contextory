@@ -810,9 +810,10 @@ export class ObjectStore {
   patchObject(id: string, patch: ObjectPatch, now: number): ObjectSummary {
     this.database.transaction(() => {
       const row = this.requireRow(id);
+      const type = patch.type ?? row.type;
       this.upsertObject(
         id,
-        row.type,
+        type,
         patch.title === undefined
           ? nodes(row.title)
           : patch.title
@@ -830,6 +831,14 @@ export class ObjectStore {
           value,
         })),
       );
+      if (type !== row.type)
+        // 新しい種別に無いFieldの値は消す。
+        this.database
+          .prepare(
+            `DELETE FROM field_values WHERE object_id = ?
+             AND field_id NOT IN (SELECT value FROM json_each(?))`,
+          )
+          .run(id, JSON.stringify(this.fieldsOf(type).map((f) => f.id)));
       this.reindex(id, now);
     })();
     return this.getObject(id);

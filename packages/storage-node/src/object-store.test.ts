@@ -684,6 +684,23 @@ describe("ObjectStore", () => {
     );
   });
 
+  it("changes an object's type and drops fields the new type lacks", () => {
+    store.updateType("task", {
+      fields: [{ id: "due", name: "期限", kind: "text" }],
+    });
+    store.patchObject("task", { fields: { due: [text("明日")] } }, 10);
+    expect(store.patchObject("task", { type: "decision" }, 11)).toMatchObject({
+      type: "decision",
+      contexts: ["project"],
+    });
+    store.patchObject("task", { type: "task" }, 12);
+    expect(
+      store
+        .loadPage("task")
+        .doc.content?.find((node) => node.attrs?.fieldId === "due")?.content,
+    ).toBeUndefined();
+  });
+
   it("keeps the shared UI state", () => {
     store.setUiState("view:task:type", "v1");
     store.setUiState("fold:v1", ["a"]);
