@@ -322,6 +322,23 @@ export const ObjectApp = ({
     () => !narrow() && stored("nav", true),
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 端末をまたいで共有する画面の状態。読めなくても、既定の表示で続ける。 */
+  const [shared, setShared] = useState<Readonly<Record<string, unknown>>>({});
+  useEffect(() => {
+    client.uiState().then(
+      (state) => setShared((local) => ({ ...state, ...local })),
+      (error: unknown) => console.warn("UI state could not be read", error),
+    );
+  }, [client]);
+  const share = (key: string, value: unknown): void => {
+    setShared((last) => ({ ...last, [key]: value }));
+    // 保存の列には並べない。失っても困らない値なので、失敗しても止めない。
+    client
+      .setUiState(key, value)
+      .catch((error: unknown) =>
+        console.warn("UI state could not be saved", error),
+      );
+  };
   /** 開いているゴミ箱の中身。nullならゴミ箱を開いていない。 */
   const [trashList, setTrashList] = useState<readonly ObjectSummary[] | null>(
     null,
@@ -730,6 +747,8 @@ export const ObjectApp = ({
     act,
     patchType,
     trash: trashObject,
+    shared,
+    share,
   };
   // この日のDailyに置いたMemoは本文で読めるので、欄には出さない。
   const dayMemos = overview.memos.filter((memo) => memo.hostId !== page);

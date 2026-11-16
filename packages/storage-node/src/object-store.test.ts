@@ -678,6 +678,16 @@ describe("ObjectStore", () => {
     );
   });
 
+  it("keeps the shared UI state", () => {
+    store.setUiState("view:task:type", "v1");
+    store.setUiState("fold:v1", ["a"]);
+    store.setUiState("view:task:type", "v2");
+    expect(store.uiState()).toEqual({
+      "view:task:type": "v2",
+      "fold:v1": ["a"],
+    });
+  });
+
   it("refuses contexts that would create a cycle and unknown hosts", () => {
     expect(() => store.addContext("area", "task")).toThrow("cycle");
     expect(() => store.loadPage("missing")).toThrow(ObjectStoreError);

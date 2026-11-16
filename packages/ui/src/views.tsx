@@ -65,7 +65,7 @@ export const commitOnEnter = (
     event.currentTarget.blur();
 };
 
-/** 開いていたViewや畳んだ行は、端末ごとの表示の状態としてブラウザーに残す。 */
+/** 端末ごとの表示の状態（メニューの開閉など）は、ブラウザーに残す。 */
 export const stored = <T,>(key: string, fallback: T): T => {
   try {
     const text = localStorage.getItem(`contextory.${key}`);
@@ -100,6 +100,9 @@ export interface ViewTabsProps {
   readonly patchType: (name: string, patch: ObjectTypePatch) => void;
   /** 確かめてからゴミ箱へ移す。 */
   readonly trash: (object: ObjectSummary) => void;
+  /** 端末をまたいで共有する画面の状態（前回開いたView、畳んだ行）。 */
+  readonly shared: Readonly<Record<string, unknown>>;
+  readonly share: (key: string, value: unknown) => void;
 }
 
 /** 種別のページとObjectのページに並べる、Viewのタブと中身。 */
@@ -116,26 +119,18 @@ export const ViewTabs = ({
   act,
   patchType,
   trash,
+  shared,
+  share,
 }: ViewTabsProps): React.JSX.Element => {
   const views = owner.views.filter((candidate) => candidate.scope === scope);
   /** 前回開いていたView。種別とページの範囲ごとに覚える。 */
   const selectedKey = `view:${owner.name}:${scope}`;
-  const [selected, setSelected] = useState(() =>
-    stored<string | null>(selectedKey, null),
-  );
-  const choose = (id: string): void => {
-    setSelected(id);
-    store(selectedKey, id);
-  };
+  const selected = shared[selectedKey];
+  const choose = (id: string): void => share(selectedKey, id);
   /** 絞り込みの窓で開いているField */
   const [filtering, setFiltering] = useState<string | null>(null);
   /** 並べ替えの窓で、キーを選び直している段 */
   const [sorting, setSorting] = useState<number | null>(null);
-  /** 階層で、配下を畳んでいる行。Viewごとに覚える。 */
-  const [folds, setFolds] = useState<{
-    readonly viewId: string;
-    readonly ids: ReadonlySet<string>;
-  } | null>(null);
   /** 追加行の入力と、候補の中で選んでいる位置 */
   const [newText, setNewText] = useState("");
   const [pick, setPick] = useState(0);
@@ -145,10 +140,11 @@ export const ViewTabs = ({
   } | null>(null);
   const view = views.find((candidate) => candidate.id === selected) ?? views[0];
   const viewId = view?.id;
-  const folded =
-    folds && folds.viewId === viewId
-      ? folds.ids
-      : new Set(viewId ? stored<string[]>(`fold:${viewId}`, []) : []);
+  /** 階層で、配下を畳んでいる行。Viewごとに覚える。 */
+  const foldKey = `fold:${viewId ?? ""}`;
+  const folded = new Set(
+    Array.isArray(shared[foldKey]) ? (shared[foldKey] as string[]) : [],
+  );
 
   useEffect(() => {
     if (!viewId) return;
@@ -890,8 +886,7 @@ export const ViewTabs = ({
               const next = new Set(folded);
               if (closed) next.delete(object.id);
               else next.add(object.id);
-              setFolds({ viewId: view.id, ids: next });
-              store(`fold:${view.id}`, [...next]);
+              share(foldKey, [...next]);
             }}
           >
             {parent ? (closed ? "▸" : "▾") : ""}

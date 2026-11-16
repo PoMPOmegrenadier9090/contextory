@@ -63,6 +63,10 @@ const api: DesktopApi = {
     invoke<void>(DESKTOP_IPC_CHANNELS.objectDeleteType, name),
   overview: (from, to) =>
     invoke<ObjectOverview>(DESKTOP_IPC_CHANNELS.objectOverview, { from, to }),
+  uiState: () =>
+    invoke<Readonly<Record<string, unknown>>>(DESKTOP_IPC_CHANNELS.uiState),
+  setUiState: (key, value) =>
+    invoke<void>(DESKTOP_IPC_CHANNELS.setUiState, key, value),
 };
 
 const connection: DesktopConnectionApi = {

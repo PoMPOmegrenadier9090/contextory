@@ -40,7 +40,7 @@ import {
 
 import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 6;
+export const OBJECT_STORE_SCHEMA_VERSION = 7;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
@@ -234,6 +234,17 @@ export class ObjectStore {
       this.database.transaction(() => {
         this.database.exec("ALTER TABLE objects ADD COLUMN deleted_at INTEGER");
         this.database.pragma("user_version = 6");
+      })();
+    if (version < 7)
+      this.database.transaction(() => {
+        // 前回開いたViewや畳んだ行など、端末をまたいで共有する画面の状態。
+        this.database.exec(`
+          CREATE TABLE ui_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          ) WITHOUT ROWID;
+        `);
+        this.database.pragma("user_version = 7");
       })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
   }
@@ -1407,6 +1418,27 @@ export class ObjectStore {
       if (text) files.push({ path, text: `# ${date}\n\n${text}\n` });
     }
     return files;
+  }
+
+  /** 端末をまたいで共有する画面の状態。 */
+  uiState(): Record<string, unknown> {
+    return Object.fromEntries(
+      (
+        this.database.prepare("SELECT key, value FROM ui_state").all() as {
+          key: string;
+          value: string;
+        }[]
+      ).map(({ key, value }) => [key, JSON.parse(value) as unknown]),
+    );
+  }
+
+  setUiState(key: string, value: unknown): void {
+    this.database
+      .prepare(
+        `INSERT INTO ui_state (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(key, JSON.stringify(value ?? null));
   }
 
   /** 書き込み中でも整ったDBの複製を作る。 */
