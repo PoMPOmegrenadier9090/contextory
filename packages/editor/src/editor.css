@@ -646,3 +646,32 @@
   overflow: hidden;
   white-space: nowrap;
 }
+
+.pe-editor .pe-object [data-context-field] {
+  position: relative;
+  padding: 4px 0 4px 74px;
+}
+
+.pe-editor .pe-object [data-context-field]::before {
+  position: absolute;
+  inset: 6px auto auto 0;
+  min-width: 0;
+}
+
+.pe-object [data-context-field] .pe-chip {
+  max-width: 100%;
+  margin: 1px 3px 1px 0;
+  padding: 1px 8px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  vertical-align: middle;
+  border-radius: 999px;
+}
+
+.pe-object [data-context-field] .pe-chip::before {
+  display: none;
+}
+
+.pe-object [data-context-field] .pe-chip:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--pe-type) 23%, transparent);
+}

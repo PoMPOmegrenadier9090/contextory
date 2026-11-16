@@ -163,17 +163,40 @@ const inheritedAt = ($pos: ResolvedPos, host: EditorHost): string[] => {
 
 /* ---------- nodes ---------- */
 
-const RefChip = ({ node }: NodeViewProps): React.JSX.Element => {
+const RefChip = ({
+  node,
+  editor,
+  getPos,
+}: NodeViewProps): React.JSX.Element => {
   const host = useHost();
   const id = String(node.attrs.objectId);
   const info = host.lookup(id);
+  const pos = getPos();
+  const parent =
+    pos === undefined ? null : editor.state.doc.resolve(pos).parent;
+  const context =
+    parent?.type.name === "objectField" &&
+    parent.attrs.fieldId === CONTEXT_FIELD.id;
+  const open = (): void => host.open(id);
   return (
     <NodeViewWrapper
       as="span"
       className="pe-chip"
       data-type={info?.type ?? "missing"}
       data-color={info ? typeOf(host, info.type)?.color : undefined}
-      onClick={() => host.open(id)}
+      role={context && info ? "button" : undefined}
+      tabIndex={context && info ? 0 : undefined}
+      onClick={open}
+      onKeyDown={
+        context && info
+          ? (event: React.KeyboardEvent<HTMLSpanElement>) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              open();
+            }
+          : undefined
+      }
     >
       {info ? info.title : "削除されたObject"}
     </NodeViewWrapper>
@@ -387,7 +410,13 @@ const ObjectField = Node.create({
   parseHTML: () => [{ tag: "div[data-object-field]" }],
   renderHTML: ({ node }) => [
     "div",
-    { "data-object-field": "", "data-label": String(node.attrs.name) },
+    {
+      "data-object-field": "",
+      "data-label": String(node.attrs.name),
+      ...(node.attrs.fieldId === CONTEXT_FIELD.id
+        ? { "data-context-field": "" }
+        : {}),
+    },
     0,
   ],
   addKeyboardShortcuts() {
