@@ -105,6 +105,9 @@ export const ViewTabs = ({
   const [sorting, setSorting] = useState<number | null>(null);
   /** 階層で、配下を畳んでいる行 */
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  /** 追加行の入力と、候補の中で選んでいる位置 */
+  const [newText, setNewText] = useState("");
+  const [pick, setPick] = useState(0);
   const [loaded, setLoaded] = useState<{
     readonly viewId: string;
     readonly data: ViewResult;
@@ -810,6 +813,20 @@ export const ViewTabs = ({
       />
     );
   };
+  /** 追加行で「#」に続けて打っている間の、名前が前方一致する種別 */
+  const word = /^#(\S*)$/.exec(newText)?.[1]?.toLowerCase();
+  const suggestions =
+    word === undefined
+      ? []
+      : types.filter((definition) =>
+          [definition.name, typeLabel(definition.name)].some((candidate) =>
+            candidate.toLowerCase().startsWith(word),
+          ),
+        );
+  const complete = (definition: TypeDefinition): void => {
+    setNewText(`#${typeLabel(definition.name)} `);
+    setPick(0);
+  };
   /** 畳んだ行の配下を除いた行。parentは、下に入れ子の行があるか。 */
   const rows: { row: ViewRow; parent: boolean }[] = [];
   let hideBelow: number | null = null;
@@ -1029,6 +1046,11 @@ export const ViewTabs = ({
               <td colSpan={columns.length + 2}>
                 <input
                   className="od-cell-input od-table-new"
+                  value={newText}
+                  onChange={(event) => {
+                    setNewText(event.currentTarget.value);
+                    setPick(0);
+                  }}
                   aria-label={
                     target ? `#${typeLabel(target.name)}を追加` : "Objectを追加"
                   }
@@ -1038,8 +1060,25 @@ export const ViewTabs = ({
                       : "＋ 「#種別 Title」で追加"
                   }
                   onKeyDown={(event) => {
-                    const input = event.currentTarget;
-                    const typed = input.value.trim();
+                    if (event.nativeEvent.isComposing) return;
+                    // 候補が出ている間は、矢印で選び、EnterかTabで種別を入れる。
+                    if (suggestions.length) {
+                      const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+                      if (move) {
+                        event.preventDefault();
+                        setPick(
+                          (pick + move + suggestions.length) %
+                            suggestions.length,
+                        );
+                        return;
+                      }
+                      if (event.key === "Enter" || event.key === "Tab") {
+                        event.preventDefault();
+                        complete(suggestions[pick] ?? suggestions[0]!);
+                        return;
+                      }
+                    }
+                    const typed = newText.trim();
                     if (
                       event.key !== "Enter" ||
                       event.nativeEvent.isComposing ||
@@ -1058,7 +1097,7 @@ export const ViewTabs = ({
                     const type = named ?? target;
                     const title = named ? rest.trim() : typed;
                     if (!type) return;
-                    input.value = "";
+                    setNewText("");
                     // 一つの値で絞っている選択は、新しいObjectの初期値にする。
                     const initial = Object.fromEntries(
                       type.name !== target?.name
@@ -1091,6 +1130,23 @@ export const ViewTabs = ({
                     });
                   }}
                 />
+                {suggestions.length ? (
+                  <div className="od-chips od-type-suggest" role="listbox">
+                    {suggestions.map((definition, index) => (
+                      <button
+                        key={definition.name}
+                        type="button"
+                        role="option"
+                        aria-selected={index === pick}
+                        // 入力欄からフォーカスを外さずに選ぶ。
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => complete(definition)}
+                      >
+                        #{typeLabel(definition.name)}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </td>
             </tr>
           ) : null}

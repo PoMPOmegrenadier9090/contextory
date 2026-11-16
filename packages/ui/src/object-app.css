@@ -1205,6 +1205,22 @@ body,
   cursor: default;
 }
 
+/* 追加行の種別の候補。選んでいるものに枠を付ける。 */
+.od-demo .od-type-suggest button {
+  padding: 2px 8px;
+  color: var(--od-ink);
+  font: inherit;
+  font-size: 12px;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.od-demo .od-type-suggest button[aria-selected="true"] {
+  border-color: var(--od-accent);
+}
+
 .od-cell-title .od-cell-input {
   font-weight: 600;
 }
