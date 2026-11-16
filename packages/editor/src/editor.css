@@ -231,7 +231,8 @@
 }
 
 /* チェックボックスのある種別は、行末の矢印で開く。 */
-.pe-open {
+.pe-open,
+.pe-more {
   display: grid;
   place-items: center;
   width: 24px;
@@ -245,19 +246,39 @@
   opacity: 0;
 }
 
-.pe-open:hover {
+.pe-more {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.pe-open:hover,
+.pe-more:hover {
   color: var(--pe-type);
   background: color-mix(in srgb, var(--pe-type) 14%, transparent);
 }
 
 .pe-object:hover > .pe-object-side > .pe-open,
-.pe-open:focus-visible {
+.pe-object:hover > .pe-object-side > .pe-more,
+.pe-object[data-selected="true"] > .pe-object-side > .pe-more,
+.pe-open:focus-visible,
+.pe-more:focus-visible {
   opacity: 1;
+}
+
+/* ブロックごと選んだObject。⌫で消し、⌘Xで切り取れる。 */
+.pe-object[data-selected="true"] {
+  background: color-mix(in srgb, var(--pe-type) 12%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pe-type) 45%, transparent);
+}
+
+.pe-editor .tiptap .ProseMirror-selectednode {
+  outline: none;
 }
 
 @media (hover: none) {
   .pe-toggle,
-  .pe-open {
+  .pe-open,
+  .pe-more {
     opacity: 1;
   }
 }
@@ -427,4 +448,21 @@
   color: var(--pe-muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.pe-block-menu {
+  width: 220px;
+}
+
+.pe-menu.pe-block-menu button {
+  display: flex;
+  justify-content: space-between;
+}
+
+.pe-block-menu button:hover {
+  background: var(--pe-subtle);
+}
+
+.pe-block-menu button[data-danger="true"] {
+  color: #a3423a;
 }
