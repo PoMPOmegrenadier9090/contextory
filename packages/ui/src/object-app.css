@@ -1500,3 +1500,18 @@ body:has(.od-search-dialog:modal) {
 .od-search-dialog p {
   color: var(--od-muted);
 }
+
+.od-embedded-view {
+  margin-block: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--od-line);
+  border-radius: 8px;
+}
+
+.od-embedded-view h3 {
+  margin: 0 0 8px;
+}
+
+.pe-editor .tiptap .od-embedded-view .od-timeline {
+  padding: 0;
+}

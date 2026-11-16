@@ -83,6 +83,10 @@ export interface EditorHost {
   readonly open: (id: string) => void;
   /** 種別の定義。組み込みの種別も含む。 */
   readonly types: () => readonly TypeDefinition[];
+  readonly renderView?: (
+    viewId: string,
+    anchorId: string | null,
+  ) => React.ReactNode;
   /** 開いている文書がObjectの本文なら、そのObject。 */
   readonly page: { readonly id: string; readonly type: ObjectType } | null;
   /** 種別のページを開く。 */
@@ -189,6 +193,35 @@ const ObjectRef = Node.create({
   ],
   addNodeView: () => ReactNodeViewRenderer(RefChip, { as: "span" }),
 });
+
+const ViewBlock = Node.create({
+  name: "viewEmbed",
+  group: "block",
+  atom: true,
+  addAttributes: () => ({
+    viewId: { default: null },
+    anchorId: { default: null },
+  }),
+  parseHTML: () => [{ tag: "div[data-view-embed]" }],
+  renderHTML: ({ HTMLAttributes }) => [
+    "div",
+    mergeAttributes(HTMLAttributes, { "data-view-embed": "" }),
+  ],
+  addNodeView: () => ReactNodeViewRenderer(EmbeddedViewNode),
+});
+
+const EmbeddedViewNode = ({ node }: NodeViewProps): React.JSX.Element => {
+  const host = useHost();
+  const viewId: unknown = node.attrs.viewId;
+  const anchor: unknown = node.attrs.anchorId;
+  return (
+    <NodeViewWrapper className="pe-view-embed" contentEditable={false}>
+      {typeof viewId === "string" && host.renderView
+        ? host.renderView(viewId, typeof anchor === "string" ? anchor : null)
+        : "Viewを表示できません。"}
+    </NodeViewWrapper>
+  );
+};
 
 const ObjectTitle = Node.create({
   name: "objectTitle",
@@ -980,6 +1013,18 @@ const changeType = (
     .run();
 };
 
+const afterBlock = (
+  editor: Editor,
+  pos: number,
+  objectAt: number | null,
+): number => {
+  const { doc } = editor.state;
+  if (objectAt !== null)
+    return objectAt + (doc.nodeAt(objectAt)?.nodeSize ?? 0);
+  const $pos = doc.resolve(pos);
+  return $pos.depth > 0 ? $pos.after() : pos;
+};
+
 /** posのブロックの後ろに、新しいObjectを足してTitleへ入る。 */
 const embedObject = (
   editor: Editor,
@@ -988,14 +1033,7 @@ const embedObject = (
   type: ObjectType,
   host: EditorHost,
 ): void => {
-  const { doc } = editor.state;
-  const $pos = doc.resolve(pos);
-  const after =
-    objectAt !== null
-      ? objectAt + doc.nodeAt(objectAt)!.nodeSize
-      : $pos.depth > 0
-        ? $pos.after($pos.depth)
-        : pos;
+  const after = afterBlock(editor, pos, objectAt);
   editor
     .chain()
     .insertContentAt(after, { type: "paragraph" })
@@ -1300,6 +1338,35 @@ const blockItems = (
     label: "新しいObjectを埋め込む",
     items: choose((type) => embedObject(editor, pos, objectAt, type, host)),
   });
+  if (host.renderView) {
+    const views = host.types().flatMap((owner) =>
+      owner.views
+        .filter(
+          (view) => view.scope === "type" || owner.name === host.page?.type,
+        )
+        .map<BlockItem>((view) => ({
+          key: view.id,
+          label: `${typeLabel(owner.name)} · ${view.name}`,
+          run: () => {
+            if (editor.isDestroyed || pos > editor.state.doc.content.size)
+              return;
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(afterBlock(editor, pos, objectAt), {
+                type: "viewEmbed",
+                attrs: {
+                  viewId: view.id,
+                  anchorId: view.scope === "object" ? host.page?.id : null,
+                },
+              })
+              .run();
+          },
+        })),
+    );
+    if (views.length)
+      items.push({ key: "view", label: "Viewを挿入", items: views });
+  }
   return items;
 };
 
@@ -1559,6 +1626,7 @@ export const ObjectEditor = ({
       ObjectField,
       ObjectFieldControl,
       ObjectBlock,
+      ViewBlock,
       BlockSelection,
       CollapsedGuard,
       SelectionBody,

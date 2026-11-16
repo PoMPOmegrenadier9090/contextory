@@ -34,7 +34,15 @@ import {
   localDate,
   shiftDate,
 } from "./object-date.js";
-import { commitOnEnter, KIND_LABEL, store, stored, ViewTabs } from "./views.js";
+import {
+  commitOnEnter,
+  EmbeddedView,
+  EmbeddedViewContext,
+  KIND_LABEL,
+  store,
+  stored,
+  ViewTabs,
+} from "./views.js";
 
 const isDaily = (hostId: string): boolean =>
   hostId === DAILY_UNDATED_ID || dailyDate(hostId) !== null;
@@ -657,6 +665,9 @@ export const ObjectApp = ({
   const host = useMemo<EditorHost>(
     () => ({
       lookup: (id) => objects[id],
+      renderView: (viewId, anchorId) => (
+        <EmbeddedView viewId={viewId} anchorId={anchorId} />
+      ),
       types: () => types,
       page: current ? { id: current.id, type: current.type } : null,
       search: (query) =>
@@ -849,7 +860,7 @@ export const ObjectApp = ({
       {object.title}
     </button>
   );
-  return (
+  const content = (
     <div className="od-demo">
       <header className="od-topbar">
         <div>
@@ -1541,5 +1552,10 @@ export const ObjectApp = ({
         </main>
       </div>
     </div>
+  );
+  return (
+    <EmbeddedViewContext.Provider value={viewProps}>
+      {content}
+    </EmbeddedViewContext.Provider>
   );
 };

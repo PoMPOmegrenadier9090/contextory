@@ -102,6 +102,21 @@ describe("ObjectStore", () => {
     });
   });
 
+  it("preserves embedded View references in a document", () => {
+    const doc: DocNode = {
+      type: "doc",
+      content: [
+        { type: "viewEmbed", attrs: { viewId: "table-view", anchorId: null } },
+      ],
+    };
+    store.savePage("daily:2026-11-12", doc, 1);
+    expect(store.loadPage("daily:2026-11-12").doc).toEqual(doc);
+    expect(
+      store.exportMarkdown().find((file) => file.path === "daily/2026-11-12.md")
+        ?.text,
+    ).toContain("<!-- Contextory View -->");
+  });
+
   it("creates objects from the document with inherited contexts", () => {
     const tree = doc(
       block("new", "task", "新規", block("child", "task", "子")),

@@ -99,6 +99,8 @@ const block = (node: DocNode, link: MarkdownLookup): string => {
       return "---";
     case "objectField":
       return "";
+    case "viewEmbed":
+      return "<!-- Contextory View -->";
     case "objectEmbed": {
       const target = link(String(node.attrs?.objectId));
       if (!target) return "";

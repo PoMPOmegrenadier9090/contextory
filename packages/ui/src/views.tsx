@@ -23,7 +23,7 @@ import {
   Segmented,
   typeLabel,
 } from "@pkm/editor";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 import { localDate } from "./object-date.js";
 
@@ -104,6 +104,36 @@ export interface ViewTabsProps {
   readonly share: (key: string, value: unknown) => void;
 }
 
+export const EmbeddedViewContext = createContext<Omit<
+  ViewTabsProps,
+  "owner" | "scope" | "anchorId"
+> | null>(null);
+
+export const EmbeddedView = ({
+  viewId,
+  anchorId,
+}: {
+  viewId: string;
+  anchorId: string | null;
+}): React.JSX.Element => {
+  const props = useContext(EmbeddedViewContext);
+  const owner = props?.types.find((type) =>
+    type.views.some((view) => view.id === viewId),
+  );
+  const view = owner?.views.find((view) => view.id === viewId);
+  if (!props || !owner || !view)
+    return <p className="od-empty">Viewが見つかりません。</p>;
+  return (
+    <ViewTabs
+      {...props}
+      owner={owner}
+      scope={view.scope}
+      anchorId={anchorId}
+      embeddedViewId={viewId}
+    />
+  );
+};
+
 /** 種別のページとObjectのページに並べる、Viewのタブと中身。 */
 export const ViewTabs = ({
   client,
@@ -120,11 +150,12 @@ export const ViewTabs = ({
   trash,
   shared,
   share,
-}: ViewTabsProps): React.JSX.Element => {
+  embeddedViewId,
+}: ViewTabsProps & { readonly embeddedViewId?: string }): React.JSX.Element => {
   const views = owner.views.filter((candidate) => candidate.scope === scope);
   /** 前回開いていたView。種別とページの範囲ごとに覚える。 */
   const selectedKey = `view:${owner.name}:${scope}`;
-  const selected = shared[selectedKey];
+  const selected = embeddedViewId ?? shared[selectedKey];
   const choose = (id: string): void => share(selectedKey, id);
   /** 絞り込みの窓で開いているField */
   const [filtering, setFiltering] = useState<string | null>(null);
@@ -135,7 +166,7 @@ export const ViewTabs = ({
   const [pick, setPick] = useState(0);
   const [loaded, setLoaded] = useState<{
     readonly viewId: string;
-    readonly data: ViewResult;
+    readonly data: ViewResult | null;
   } | null>(null);
   const view = views.find((candidate) => candidate.id === selected) ?? views[0];
   const viewId = view?.id;
@@ -155,7 +186,9 @@ export const ViewTabs = ({
         setLoaded({ viewId, data });
       },
       // 作ったばかりのViewは、保存が済んだ合図（tick）で読み直す。
-      () => undefined,
+      () => {
+        if (live && embeddedViewId) setLoaded({ viewId, data: null });
+      },
     );
     return () => {
       live = false;
@@ -1302,6 +1335,62 @@ export const ViewTabs = ({
     }
     return items;
   };
+
+  if (embeddedViewId)
+    return (
+      <section className="od-embedded-view" aria-label={view.name}>
+        <h3>{view.name}</h3>
+        {!data ? (
+          <p className="od-empty">
+            {loaded?.viewId === viewId
+              ? "Viewを読み込めませんでした。"
+              : "読み込み中…"}
+          </p>
+        ) : table && data.rows.length ? (
+          <div className="od-table-wrap">
+            <table className="od-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  {columns.map((field) => (
+                    <th key={field.id}>{field.name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((row, index) => (
+                  <tr key={`${row.object.id}-${index}`}>
+                    <td style={{ paddingInlineStart: 8 + row.depth * 20 }}>
+                      <button type="button" onClick={() => open(row.object.id)}>
+                        {row.object.title}
+                      </button>
+                    </td>
+                    {columns.map((field) => (
+                      <td key={field.id}>
+                        {field.kind === "context"
+                          ? row.object.contexts
+                              .map(
+                                (id) =>
+                                  data.objects[id]?.title ??
+                                  lookup(id)?.title ??
+                                  "…",
+                              )
+                              .join("、")
+                          : textOf(row.values[field.id] ?? [])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : data.entries.length ? (
+          <ul className="od-timeline">{timeline(data.entries)}</ul>
+        ) : (
+          <p className="od-empty">まだありません。</p>
+        )}
+      </section>
+    );
 
   return (
     <section className="od-panel">
