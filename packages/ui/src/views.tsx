@@ -65,6 +65,23 @@ export const commitOnEnter = (
     event.currentTarget.blur();
 };
 
+/** 開いていたViewや畳んだ行は、端末ごとの表示の状態としてブラウザーに残す。 */
+const stored = <T,>(key: string, fallback: T): T => {
+  try {
+    const text = localStorage.getItem(`contextory.${key}`);
+    return text === null ? fallback : (JSON.parse(text) as T);
+  } catch {
+    return fallback;
+  }
+};
+const store = (key: string, value: unknown): void => {
+  try {
+    localStorage.setItem(`contextory.${key}`, JSON.stringify(value));
+  } catch {
+    // 残せなくても、表示はそのまま続ける。
+  }
+};
+
 export interface ViewTabsProps {
   readonly client: ObjectClient;
   /** Viewを持つ種別 */
@@ -98,13 +115,24 @@ export const ViewTabs = ({
   patchType,
 }: ViewTabsProps): React.JSX.Element => {
   const views = owner.views.filter((candidate) => candidate.scope === scope);
-  const [selected, setSelected] = useState<string | null>(null);
+  /** 前回開いていたView。種別とページの範囲ごとに覚える。 */
+  const selectedKey = `view:${owner.name}:${scope}`;
+  const [selected, setSelected] = useState(() =>
+    stored<string | null>(selectedKey, null),
+  );
+  const choose = (id: string): void => {
+    setSelected(id);
+    store(selectedKey, id);
+  };
   /** 絞り込みの窓で開いているField */
   const [filtering, setFiltering] = useState<string | null>(null);
   /** 並べ替えの窓で、キーを選び直している段 */
   const [sorting, setSorting] = useState<number | null>(null);
-  /** 階層で、配下を畳んでいる行 */
-  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  /** 階層で、配下を畳んでいる行。Viewごとに覚える。 */
+  const [folds, setFolds] = useState<{
+    readonly viewId: string;
+    readonly ids: ReadonlySet<string>;
+  } | null>(null);
   /** 追加行の入力と、候補の中で選んでいる位置 */
   const [newText, setNewText] = useState("");
   const [pick, setPick] = useState(0);
@@ -114,6 +142,10 @@ export const ViewTabs = ({
   } | null>(null);
   const view = views.find((candidate) => candidate.id === selected) ?? views[0];
   const viewId = view?.id;
+  const folded =
+    folds && folds.viewId === viewId
+      ? folds.ids
+      : new Set(viewId ? stored<string[]>(`fold:${viewId}`, []) : []);
 
   useEffect(() => {
     if (!viewId) return;
@@ -137,7 +169,7 @@ export const ViewTabs = ({
   const add = (base: Omit<ViewDefinition, "id">): void => {
     const id = newId();
     saveViews([...owner.views, { ...base, id }]);
-    setSelected(id);
+    choose(id);
   };
   // 継承元のViewは、複製して自分のViewにする。
   const inheritable: ViewDefinition[] = [];
@@ -161,7 +193,7 @@ export const ViewTabs = ({
           key={candidate.id}
           type="button"
           aria-pressed={candidate.id === viewId}
-          onClick={() => setSelected(candidate.id)}
+          onClick={() => choose(candidate.id)}
         >
           {candidate.name}
         </button>
@@ -855,7 +887,8 @@ export const ViewTabs = ({
               const next = new Set(folded);
               if (closed) next.delete(object.id);
               else next.add(object.id);
-              setFolded(next);
+              setFolds({ viewId: view.id, ids: next });
+              store(`fold:${view.id}`, [...next]);
             }}
           >
             {parent ? (closed ? "▸" : "▾") : ""}
