@@ -242,7 +242,8 @@ if (smoke) {
           'loadPage', 'savePage', 'searchObjects',
           'createObject', 'patchObject', 'queryView',
           'types', 'updateType', 'overview', 'trashObject',
-          'restoreObject', 'purgeObject', 'trash', 'emptyTrash', 'deleteType'
+          'restoreObject', 'purgeObject', 'trash', 'emptyTrash', 'deleteType',
+          'uiState', 'setUiState'
         ].every((name) => typeof window.pkm?.[name] === 'function')
       });
       const initial = inspect();

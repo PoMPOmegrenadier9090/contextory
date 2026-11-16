@@ -65,6 +65,7 @@ export const parseObjectPatch = (value: unknown): ObjectPatch => {
   return {
     ...(typeof body.title === "string" ? { title: body.title } : {}),
     ...(typeof body.done === "boolean" ? { done: body.done } : {}),
+    ...(body.type === undefined ? {} : { type: requireType(body.type) }),
     ...(body.fields === undefined
       ? {}
       : {

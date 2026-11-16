@@ -5,6 +5,12 @@ body,
   margin: 0;
 }
 
+html {
+  /* ピンチとダブルタップでの拡大を止める。スクロールはそのまま。 */
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+}
+
 /* WebとDesktopで共有するObject画面。 */
 .od-demo {
   --od-bg: #f3f1ec;
@@ -149,8 +155,8 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 56px;
-  padding: 8px 20px;
+  min-height: 44px;
+  padding: 4px 12px;
   background: color-mix(in srgb, var(--od-surface) 94%, transparent);
   border-bottom: 1px solid var(--od-line);
   backdrop-filter: blur(14px);
@@ -175,11 +181,19 @@ body,
   border-left: 1px solid var(--od-line-strong);
 }
 
+.od-topbar-actions {
+  gap: 4px;
+}
+
 .od-topbar-actions a,
 .od-topbar-actions button {
-  padding: 6px 12px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   color: var(--od-ink);
-  font-size: 13px;
+  font-size: 16px;
   text-decoration: none;
   background: var(--od-surface);
   border: 1px solid var(--od-line-strong);
@@ -252,12 +266,73 @@ body,
 .od-shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  min-height: calc(100vh - 56px);
+  min-height: calc(100vh - 44px);
+}
+
+.od-shell[data-nav="closed"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.od-nav[hidden],
+.od-nav-backdrop {
+  display: none;
+}
+
+.od-demo .od-menu-toggle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 18px;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+}
+
+.od-demo .od-menu-toggle:hover {
+  background: var(--od-subtle);
+}
+
+.od-topbar > div:first-child {
+  gap: 8px;
+  min-width: 0;
+}
+
+.od-save-status {
+  white-space: nowrap;
+}
+
+.od-nav .od-nav-settings {
+  margin-top: 16px;
+  color: var(--od-muted);
+  font-size: 13px;
+}
+
+.od-settings {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.od-settings dt {
+  color: var(--od-muted);
+}
+
+.od-settings dd {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.od-settings a {
+  color: var(--od-accent);
 }
 
 .od-nav {
   position: sticky;
-  top: 56px;
+  top: 44px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -292,28 +367,6 @@ body,
 
 .od-nav .od-nav-project {
   padding-left: 22px;
-}
-
-.od-keys {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 10px;
-  margin: 24px 0 0;
-  padding: 12px;
-  color: var(--od-muted);
-  font-size: 12px;
-  background: var(--od-subtle);
-  border-radius: 8px;
-}
-
-.od-keys dt {
-  color: var(--od-ink);
-  font-family: ui-monospace, monospace;
-  font-weight: 600;
-}
-
-.od-keys dd {
-  margin: 0;
 }
 
 .od-nav-note {
@@ -543,14 +596,80 @@ body,
   white-space: nowrap;
 }
 
-.od-nav-downloads {
+/* Timeline。日付の見出しと、本文の先頭を読めるカード。 */
+.od-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.od-day {
+  margin-top: 10px;
+  color: var(--od-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.od-day:first-child {
+  margin-top: 0;
+}
+
+.od-demo .od-card > button {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line);
+  border-left: 3px solid var(--od-type);
+  border-radius: 8px;
 }
 
-.od-nav-downloads a {
+.od-demo .od-card > button:hover {
+  border-color: var(--od-line-strong);
+  border-left-color: var(--od-type);
+}
+
+.od-card-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.od-card-head strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.od-card[data-done="true"] .od-card-head strong {
   color: var(--od-muted);
+  text-decoration: line-through;
+}
+
+.od-card time,
+.od-card small {
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
+.od-excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--od-ink);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .od-conflict {
@@ -581,37 +700,41 @@ body,
 
 @media (max-width: 760px) {
   .od-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
+  /* 狭い画面では、メニューを本文の上に重ねる。 */
   .od-nav {
-    position: static;
-    flex-flow: row wrap;
-    padding: 10px 16px 0;
+    position: fixed;
+    top: 44px;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(280px, 85vw);
+    overflow-y: auto;
+    background: var(--od-bg);
+    box-shadow: 8px 0 30px color-mix(in srgb, var(--od-ink) 18%, transparent);
   }
 
-  .od-nav button,
-  .od-nav > div {
-    width: auto;
+  .od-nav-backdrop {
+    position: fixed;
+    inset: 44px 0 0;
+    z-index: 39;
+    display: block;
+    background: color-mix(in srgb, var(--od-ink) 20%, transparent);
   }
 
-  .od-nav > div {
-    display: contents;
-  }
-
-  .od-nav .od-nav-area,
-  .od-nav .od-nav-project {
-    margin: 0;
-    padding-left: 10px;
-  }
-
-  .od-keys,
-  .od-nav-note {
+  .od-save-status[data-saved="true"] {
     display: none;
   }
 
   .od-main {
     padding: 16px 16px 120px;
+  }
+
+  /* 開閉の矢印は本文の左の余白に出るので、その分をあける。 */
+  .od-demo .od-document .pe-editor {
+    padding: 0 12px 0 30px;
   }
 
   .od-row {
@@ -1267,14 +1390,43 @@ body,
   font-weight: 600;
 }
 
-.od-demo .od-cell-open {
+.od-demo .od-cell-open,
+.od-demo .od-cell-more > button {
   color: var(--od-muted);
   visibility: hidden;
 }
 
+.od-demo .od-cell-more > button {
+  padding: 3px 5px;
+  font: inherit;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
 .od-table tr:hover .od-cell-open,
-.od-cell-open:focus {
+.od-cell-open:focus,
+.od-demo .od-table tr:hover .od-cell-more > button,
+.od-demo .od-cell-more > button:focus,
+.od-demo .od-cell-more > button[aria-expanded="true"] {
   visibility: visible;
+}
+
+@media (hover: none) {
+  .od-demo .od-cell-open,
+  .od-demo .od-cell-more > button {
+    visibility: visible;
+  }
+}
+
+.od-menu > .od-danger {
+  margin-top: 6px;
+  padding: 4px 8px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
 }
 
 .od-cell-empty {

@@ -125,6 +125,14 @@ export const registerObjectRoutes = (
     return store.overview(from, to);
   });
 
+  app.get("/api/next/state", () => store.uiState());
+  app.put("/api/next/state/:key", (request, reply) => {
+    store.setUiState(
+      param(request.params, "key"),
+      requireRecord(request.body).value,
+    );
+    return reply.code(204).send();
+  });
   app.get("/api/next/backup", async (_request, reply) => {
     const dir = await mkdtemp(join(tmpdir(), "contextory-backup-"));
     try {

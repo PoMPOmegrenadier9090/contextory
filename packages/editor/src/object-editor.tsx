@@ -6,7 +6,14 @@ import {
   type Node as PMNode,
   type ResolvedPos,
 } from "@tiptap/pm/model";
-import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import {
+  NodeSelection,
+  Plugin,
+  PluginKey,
+  TextSelection,
+  type EditorState,
+  type Transaction,
+} from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
   EditorContent,
@@ -31,6 +38,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type RefObject,
@@ -86,6 +94,10 @@ const TYPE_LABEL: Record<string, string> = {
 export const typeLabel = (type: ObjectType): string => TYPE_LABEL[type] ?? type;
 
 const HostContext = createContext<EditorHost | null>(null);
+/** 埋め込んだObjectの「⋯」から、そのObjectのメニューを開く。 */
+const BlockMenuContext = createContext<
+  (pos: number, x: number, y: number, objectAt: number) => void
+>(() => undefined);
 const useHost = (): EditorHost => {
   const host = useContext(HostContext);
   if (!host) throw new Error("EditorHost is missing");
@@ -352,9 +364,11 @@ const ObjectBlockView = ({
   node,
   editor,
   getPos,
+  selected,
   updateAttributes,
 }: NodeViewProps): React.JSX.Element => {
   const host = useHost();
+  const openMenu = useContext(BlockMenuContext);
   const id = String(node.attrs.objectId);
   const type = node.attrs.type as ObjectType;
   const collapsed = Boolean(node.attrs.collapsed);
@@ -435,6 +449,7 @@ const ObjectBlockView = ({
       data-color={definition?.color ?? undefined}
       data-collapsed={collapsed}
       data-done={checkbox && Boolean(node.attrs.done)}
+      data-selected={selected}
     >
       {/* 行頭は種別のアイコンか、チェックボックス。幅はどの種別も同じにする。 */}
       <span className="pe-object-lead" contentEditable={false}>
@@ -488,9 +503,44 @@ const ObjectBlockView = ({
             </svg>
           </button>
         ) : null}
+        <button
+          type="button"
+          className="pe-more"
+          aria-label={`${typeLabel(type)}のメニュー`}
+          title="選択してメニューを開く"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            const at = getPos();
+            if (at === undefined) return;
+            editor.chain().focus().setNodeSelection(at).run();
+            const rect = event.currentTarget.getBoundingClientRect();
+            openMenu(at + 1, rect.right - 220, rect.bottom + 4, at);
+          }}
+        >
+          ⋯
+        </button>
       </span>
     </NodeViewWrapper>
   );
+};
+
+/** Objectを解除して、Titleを段落に、本文をその後ろに戻す。Field行は捨てる。 */
+const unwrapObject = (
+  tr: Transaction,
+  state: EditorState,
+  start: number,
+): void => {
+  const object = tr.doc.nodeAt(start);
+  if (!object) return;
+  const body: PMNode[] = [];
+  object.forEach((child, _offset, index) => {
+    if (index > 0 && !isField(child)) body.push(child);
+  });
+  tr.replaceWith(start, start + object.nodeSize, [
+    state.schema.nodes.paragraph!.create(null, object.firstChild!.content),
+    ...body,
+  ]);
+  tr.setSelection(TextSelection.create(tr.doc, start + 1));
 };
 
 const ObjectBlock = Node.create({
@@ -520,6 +570,14 @@ const ObjectBlock = Node.create({
       return depths;
     };
     return {
+      // Escで、カーソルを包むObjectをブロックごと選ぶ。選べば⌫で消せ、⌘Xで切り取れる。
+      Escape: ({ editor }) => {
+        const { selection } = editor.state;
+        if (selection instanceof NodeSelection) return false;
+        const [depth] = objectDepths(selection.$from);
+        if (depth === undefined) return false;
+        return editor.commands.setNodeSelection(selection.$from.before(depth));
+      },
       // Tanaと同じく、Cmd+↓で開き、Cmd+↑で畳む。Objectの外では既定の動きのまま。
       "Mod-ArrowDown": ({ editor }) => {
         const { $from } = editor.state.selection;
@@ -607,18 +665,7 @@ const ObjectBlock = Node.create({
         return editor
           .chain()
           .command(({ tr, state }) => {
-            const depth = $from.depth - 1;
-            const object = $from.node(depth);
-            const start = $from.before(depth);
-            const body: (typeof object)[] = [];
-            object.forEach((child, _offset, index) => {
-              if (index > 0 && !isField(child)) body.push(child);
-            });
-            tr.replaceWith(start, start + object.nodeSize, [
-              state.schema.nodes.paragraph!.create(null, $from.parent.content),
-              ...body,
-            ]);
-            tr.setSelection(TextSelection.create(tr.doc, start + 1));
+            unwrapObject(tr, state, $from.before($from.depth - 1));
             return true;
           })
           .run();
@@ -833,6 +880,94 @@ const SelectionBody = Extension.create({
   ],
 });
 
+/** 種別のField行。Contextには置かれた場所から継ぐ値を入れる。 */
+const fieldRows = (
+  state: EditorState,
+  host: EditorHost,
+  type: ObjectType,
+  $pos: ResolvedPos,
+): PMNode[] => {
+  const { objectField, objectFieldControl, objectRef } = state.schema.nodes;
+  const definition = typeOf(host, type);
+  return (
+    definition
+      ? [...definition.fields, ...definition.inherited]
+      : [CONTEXT_FIELD]
+  ).map((field) =>
+    field.kind === "date" || field.kind === "select"
+      ? objectFieldControl!.create({
+          fieldId: field.id,
+          name: field.name,
+          kind: field.kind,
+          options: field.options ?? [],
+        })
+      : objectField!.create(
+          { fieldId: field.id, name: field.name },
+          field.kind === "context"
+            ? inheritedAt($pos, host).flatMap((objectId) => [
+                objectRef!.create({ objectId }),
+                state.schema.text(" "),
+              ])
+            : null,
+        ),
+  );
+};
+
+/** 埋め込んだObjectの種別を変える。同じIDのFieldの値は残し、無いFieldの行は捨てる。 */
+const changeType = (
+  editor: Editor,
+  at: number,
+  type: ObjectType,
+  host: EditorHost,
+): void => {
+  editor
+    .chain()
+    .focus()
+    .command(({ tr, state }) => {
+      const object = tr.doc.nodeAt(at);
+      if (!object || object.type.name !== "objectBlock") return false;
+      const old = new Map<string, PMNode>();
+      const start = at + 1 + object.firstChild!.nodeSize;
+      let end = start;
+      object.forEach((child, _offset, index) => {
+        if (index === 0 || !isField(child)) return;
+        old.set(String(child.attrs.fieldId), child);
+        end += child.nodeSize;
+      });
+      const rows = fieldRows(state, host, type, tr.doc.resolve(at)).map(
+        (row) => old.get(String(row.attrs.fieldId)) ?? row,
+      );
+      tr.replaceWith(start, end, rows);
+      tr.setNodeAttribute(at, "type", type);
+      return true;
+    })
+    .run();
+};
+
+/** posのブロックの後ろに、新しいObjectを足してTitleへ入る。 */
+const embedObject = (
+  editor: Editor,
+  pos: number,
+  objectAt: number | null,
+  type: ObjectType,
+  host: EditorHost,
+): void => {
+  const { doc } = editor.state;
+  const $pos = doc.resolve(pos);
+  const after =
+    objectAt !== null
+      ? objectAt + doc.nodeAt(objectAt)!.nodeSize
+      : $pos.depth > 0
+        ? $pos.after($pos.depth)
+        : pos;
+  editor
+    .chain()
+    .insertContentAt(after, { type: "paragraph" })
+    .setTextSelection(after + 1)
+    .run();
+  convertBlock(editor, { from: after + 1, to: after + 1 }, type, host);
+};
+
 const convertBlock = (
   editor: Editor,
   range: Range,
@@ -846,14 +981,7 @@ const convertBlock = (
     .deleteRange(range)
     .command(({ tr, state }) => {
       const $pos = tr.selection.$from;
-      const {
-        objectBlock,
-        objectTitle,
-        objectField,
-        objectFieldControl,
-        objectRef,
-        paragraph,
-      } = state.schema.nodes;
+      const { objectBlock, objectTitle, paragraph } = state.schema.nodes;
       const target = conversionAt(
         $pos,
         pending && $pos.depth > 0 && pending.title === $pos.before()
@@ -861,30 +989,7 @@ const convertBlock = (
           : null,
       );
       if (!target) return false;
-      // Fieldの行は作成時に並べる。Contextには置かれた場所から継ぐ値を入れる。
-      const definition = typeOf(host, type);
-      const fields = (
-        definition
-          ? [...definition.fields, ...definition.inherited]
-          : [CONTEXT_FIELD]
-      ).map((field) =>
-        field.kind === "date" || field.kind === "select"
-          ? objectFieldControl!.create({
-              fieldId: field.id,
-              name: field.name,
-              kind: field.kind,
-              options: field.options ?? [],
-            })
-          : objectField!.create(
-              { fieldId: field.id, name: field.name },
-              field.kind === "context"
-                ? inheritedAt($pos, host).flatMap((objectId) => [
-                    objectRef!.create({ objectId }),
-                    state.schema.text(" "),
-                  ])
-                : null,
-            ),
-      );
+      const fields = fieldRows(state, host, type, $pos);
       // Titleが決まっていれば、すぐ本文を書けるように開く。空ならTitleに入る。
       const titled = target.title.size > 0;
       const body =
@@ -1010,6 +1115,266 @@ const createMenus = (
     },
   });
 
+/* ---------- block menu ---------- */
+
+interface BlockItem {
+  readonly key: string;
+  readonly label: string;
+  readonly run?: () => void;
+  /** 選ぶと、この一覧に切り替える。 */
+  readonly items?: readonly BlockItem[];
+  readonly danger?: boolean;
+}
+
+interface BlockMenu {
+  readonly x: number;
+  readonly y: number;
+  /** trueなら、yを下端にして上へ開く（キーボードの上の帯から開いたとき）。 */
+  readonly above?: boolean;
+  readonly items: readonly BlockItem[];
+}
+
+/** 右クリックや「⋯」で出すメニュー。選んでいる文字、Object、場所に合わせて並べる。 */
+const blockItems = (
+  editor: Editor,
+  host: EditorHost,
+  pos: number,
+  objectAt: number | null,
+): BlockItem[] => {
+  const { selection } = editor.state;
+  const types = [
+    ...CONVERTIBLE,
+    ...host
+      .types()
+      .filter((type) => !type.builtin)
+      .map((type) => type.name),
+  ];
+  const choose = (pick: (type: ObjectType) => void): BlockItem[] =>
+    types.map((type) => ({
+      key: type,
+      label: `#${typeLabel(type)}`,
+      run: () => pick(type),
+    }));
+  const items: BlockItem[] = [];
+  const text =
+    !selection.empty &&
+    !(selection instanceof NodeSelection) &&
+    pos >= selection.from &&
+    pos <= selection.to;
+  if (text)
+    items.push(
+      {
+        key: "bold",
+        label: "太字",
+        run: () => editor.chain().focus().toggleBold().run(),
+      },
+      {
+        key: "italic",
+        label: "斜体",
+        run: () => editor.chain().focus().toggleItalic().run(),
+      },
+      {
+        key: "strike",
+        label: "取り消し線",
+        run: () => editor.chain().focus().toggleStrike().run(),
+      },
+      {
+        key: "code",
+        label: "コード",
+        run: () => editor.chain().focus().toggleCode().run(),
+      },
+    );
+  const object = objectAt === null ? null : editor.state.doc.nodeAt(objectAt);
+  if (objectAt !== null && object) {
+    const id = String(object.attrs.objectId);
+    const select = (): boolean =>
+      editor.chain().focus().setNodeSelection(objectAt).run();
+    items.push(
+      { key: "open", label: "開く", run: () => host.open(id) },
+      {
+        key: "cut",
+        label: "切り取る",
+        run: () => select() && document.execCommand("cut"),
+      },
+      {
+        key: "copy",
+        label: "コピー",
+        run: () => select() && document.execCommand("copy"),
+      },
+      {
+        key: "type",
+        label: "種別を変える",
+        items: choose((type) => changeType(editor, objectAt, type, host)),
+      },
+      {
+        key: "unwrap",
+        label: "Objectを解除",
+        run: () =>
+          editor
+            .chain()
+            .focus()
+            .command(({ tr, state }) => {
+              unwrapObject(tr, state, objectAt);
+              return true;
+            })
+            .run(),
+      },
+      {
+        key: "delete",
+        label: "削除（ゴミ箱へ）",
+        danger: true,
+        run: () => select() && editor.commands.deleteSelection(),
+      },
+    );
+  }
+  items.push({
+    key: "embed",
+    label: "新しいObjectを埋め込む",
+    items: choose((type) => embedObject(editor, pos, objectAt, type, host)),
+  });
+  return items;
+};
+
+/* ---------- input bar ---------- */
+
+/** タッチの端末だけで、キーボードのすぐ上に書式のボタンを浮かべる。 */
+const InputBar = ({
+  editor,
+  hidden,
+  onMore,
+}: {
+  readonly editor: Editor | null;
+  /** @や#の候補が出ている間は、候補を隠さないよう引っ込める。 */
+  readonly hidden: boolean;
+  readonly onMore: (x: number, y: number) => void;
+}): React.JSX.Element | null => {
+  const [place, setPlace] = useState<{
+    readonly top: number;
+    /** 帯の中央の位置 */
+    readonly center: number;
+    readonly width: number;
+  } | null>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (
+      !editor ||
+      !window.matchMedia("(hover: none) and (pointer: coarse)").matches
+    )
+      return;
+    const viewport = window.visualViewport;
+    let frame = 0;
+    let scrolling: ReturnType<typeof setTimeout> | undefined;
+    const update = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (
+          scrolling !== undefined ||
+          editor.isDestroyed ||
+          !editor.view.hasFocus()
+        )
+          return setPlace(null);
+        const width = viewport?.width ?? window.innerWidth;
+        const bottom =
+          (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
+        setPlace({
+          top: bottom - (bar.current?.offsetHeight ?? 46) - 8,
+          center: (viewport?.offsetLeft ?? 0) + width / 2,
+          width: width - 24,
+        });
+      });
+    };
+    // スクロールしている間は隠し、止まってから出し直す。
+    const scroll = (): void => {
+      clearTimeout(scrolling);
+      setPlace(null);
+      scrolling = setTimeout(() => {
+        scrolling = undefined;
+        update();
+      }, 200);
+    };
+    editor.on("selectionUpdate", update);
+    // エディタの外へ移ったときも閉じられるよう、ページのフォーカスを見る。
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", update);
+    viewport?.addEventListener("resize", update);
+    viewport?.addEventListener("scroll", scroll);
+    window.addEventListener("scroll", scroll, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(scrolling);
+      window.removeEventListener("scroll", scroll, true);
+      editor.off("selectionUpdate", update);
+      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusout", update);
+      viewport?.removeEventListener("resize", update);
+      viewport?.removeEventListener("scroll", scroll);
+    };
+  }, [editor]);
+  if (!editor || !place || hidden) return null;
+  const buttons: readonly [string, string, () => void, string?][] = [
+    ["太字", "B", () => editor.chain().focus().toggleBold().run(), "bold"],
+    ["斜体", "I", () => editor.chain().focus().toggleItalic().run(), "italic"],
+    [
+      "取り消し線",
+      "S",
+      () => editor.chain().focus().toggleStrike().run(),
+      "strike",
+    ],
+    [
+      "インデントを減らす",
+      "←",
+      () => editor.chain().focus().liftListItem("listItem").run(),
+    ],
+    [
+      "インデントを増やす",
+      "→",
+      () => editor.chain().focus().sinkListItem("listItem").run(),
+    ],
+    [
+      "その他の操作",
+      "＋",
+      () => {
+        const rect = bar.current?.getBoundingClientRect();
+        onMore(rect?.left ?? 12, (rect?.top ?? 0) - 8);
+      },
+    ],
+    ["キーボードを閉じる", "⌄", () => editor.commands.blur()],
+  ];
+  return (
+    <div
+      ref={bar}
+      className="pe-input-bar"
+      role="toolbar"
+      aria-label="本文の書式"
+      style={{
+        top: place.top,
+        left: place.center,
+        maxWidth: place.width,
+        transform: "translateX(-50%)",
+      }}
+    >
+      {buttons.map(([label, text, run, mark]) => (
+        <button
+          key={label}
+          type="button"
+          aria-label={label}
+          title={label}
+          aria-pressed={mark ? editor.isActive(mark) : undefined}
+          // キーボードとカーソルを残したまま押せるようにする。
+          onPointerDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            if (editor.view.composing) return;
+            run();
+          }}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 /* ---------- component ---------- */
 
 export const ObjectEditor = ({
@@ -1026,6 +1391,49 @@ export const ObjectEditor = ({
 }): React.JSX.Element => {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [active, setActive] = useState(0);
+  const [blockMenu, setBlockMenu] = useState<BlockMenu | null>(null);
+  const blockMenuRef = useRef<HTMLDivElement>(null);
+  // 実際の大きさを測って、押した位置から画面の内側へ開く。下に入らなければ上へ開く。
+  useLayoutEffect(() => {
+    const element = blockMenuRef.current;
+    if (!element || !blockMenu || blockMenu.above) return;
+    const { width, height } = element.getBoundingClientRect();
+    const left =
+      blockMenu.x + width > window.innerWidth - 8
+        ? blockMenu.x - width
+        : blockMenu.x;
+    const top =
+      blockMenu.y + height > window.innerHeight - 8
+        ? blockMenu.y - height
+        : blockMenu.y;
+    element.style.left = `${Math.max(8, left)}px`;
+    element.style.top = `${Math.max(8, top)}px`;
+  }, [blockMenu]);
+  const editorRef = useRef<Editor | null>(null);
+  const [openBlockMenu] = useState(
+    () =>
+      (
+        pos: number,
+        x: number,
+        y: number,
+        objectAt?: number,
+        above = false,
+      ): void => {
+        const current = editorRef.current;
+        if (!current) return;
+        let at = objectAt ?? null;
+        const $pos = current.state.doc.resolve(pos);
+        for (let depth = $pos.depth; at === null && depth > 0; depth--)
+          if ($pos.node(depth).type.name === "objectBlock")
+            at = $pos.before(depth);
+        setBlockMenu({
+          x,
+          y,
+          above,
+          items: blockItems(current, hostRef.current, pos, at),
+        });
+      },
+  );
   const latest = useRef({ host, onChange });
   latest.current = { host, onChange };
   const hostRef = useRef(host);
@@ -1088,18 +1496,94 @@ export const ObjectEditor = ({
       createMenus(bridge, hostRef),
     ],
     content: initialDoc as JSONContent,
-    editorProps: { attributes: { "aria-label": ariaLabel } },
+    editorProps: {
+      attributes: { "aria-label": ariaLabel },
+      handleDOMEvents: {
+        contextmenu: (view, event) => {
+          const found = view.posAtCoords({
+            left: event.clientX,
+            top: event.clientY,
+          });
+          if (!found) return false;
+          event.preventDefault();
+          openBlockMenu(found.pos, event.clientX, event.clientY);
+          return true;
+        },
+      },
+    },
     onUpdate: ({ editor: updated }) =>
       latest.current.onChange(updated.getJSON() as DocNode),
   });
 
+  editorRef.current = editor;
+
   // 画面外でメニューが残らないよう、エディタを離れたら閉じる。
   useEffect(() => () => setMenu(null), []);
+  // メニューの外を押すか、Escで閉じる。
+  useEffect(() => {
+    if (!blockMenu) return;
+    const close = (event: Event): void => {
+      if (
+        event instanceof KeyboardEvent
+          ? event.key === "Escape"
+          : !(event.target as Element).closest?.(".pe-block-menu")
+      )
+        setBlockMenu(null);
+    };
+    document.addEventListener("pointerdown", close, true);
+    document.addEventListener("keydown", close, true);
+    return () => {
+      document.removeEventListener("pointerdown", close, true);
+      document.removeEventListener("keydown", close, true);
+    };
+  }, [blockMenu]);
 
   const index = Math.min(active, Math.max((menu?.items.length ?? 1) - 1, 0));
   return (
     <HostContext.Provider value={host}>
-      <EditorContent className="pe-editor" editor={editor} />
+      <BlockMenuContext.Provider value={openBlockMenu}>
+        <EditorContent className="pe-editor" editor={editor} />
+      </BlockMenuContext.Provider>
+      <InputBar
+        editor={editor}
+        hidden={menu !== null}
+        onMore={(x, y) => {
+          if (editor)
+            openBlockMenu(editor.state.selection.from, x, y, undefined, true);
+        }}
+      />
+      {blockMenu ? (
+        <div
+          ref={blockMenuRef}
+          className="pe-menu pe-block-menu"
+          role="menu"
+          style={{
+            left: Math.max(8, Math.min(blockMenu.x, window.innerWidth - 228)),
+            ...(blockMenu.above
+              ? { bottom: window.innerHeight - blockMenu.y }
+              : { top: blockMenu.y }),
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {blockMenu.items.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              data-danger={item.danger}
+              onClick={() => {
+                if (item.items)
+                  return setBlockMenu({ ...blockMenu, items: item.items });
+                setBlockMenu(null);
+                item.run?.();
+              }}
+            >
+              {item.label}
+              {item.items ? <span aria-hidden="true">›</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {menu ? (
         <div
           className="pe-menu"

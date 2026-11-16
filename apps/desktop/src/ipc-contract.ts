@@ -15,6 +15,8 @@ export const DESKTOP_IPC_CHANNELS = {
   objectUpdateType: "pkm:objects:type:update",
   objectDeleteType: "pkm:objects:type:delete",
   objectOverview: "pkm:objects:overview",
+  uiState: "pkm:ui-state:get",
+  setUiState: "pkm:ui-state:set",
   connectionGet: "pkm:connection:get",
   connectionSave: "pkm:connection:save",
   connectionClear: "pkm:connection:clear",

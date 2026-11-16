@@ -25,7 +25,7 @@ import {
 } from "@pkm/editor";
 import { useEffect, useState } from "react";
 
-import { dateRange, localDate } from "./object-date.js";
+import { localDate } from "./object-date.js";
 
 export const KIND_LABEL = {
   text: "テキスト",
@@ -41,13 +41,12 @@ const DATE_FILTERS = [
   ["past", "今日より前"],
 ] as const;
 
+/** Timelineでは日付を見出しに出すので、時刻だけにする。 */
 const formatTime = (time: number): string =>
-  new Intl.DateTimeFormat(
-    "ja-JP",
-    time >= dateRange(localDate()).from
-      ? { hour: "2-digit", minute: "2-digit" }
-      : { month: "numeric", day: "numeric" },
-  ).format(time);
+  new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(time);
 
 const refNodes = (ids: readonly string[]): DocNode[] =>
   ids.flatMap((objectId) => [
@@ -65,8 +64,8 @@ export const commitOnEnter = (
     event.currentTarget.blur();
 };
 
-/** 開いていたViewや畳んだ行は、端末ごとの表示の状態としてブラウザーに残す。 */
-const stored = <T,>(key: string, fallback: T): T => {
+/** 端末ごとの表示の状態（メニューの開閉など）は、ブラウザーに残す。 */
+export const stored = <T,>(key: string, fallback: T): T => {
   try {
     const text = localStorage.getItem(`contextory.${key}`);
     return text === null ? fallback : (JSON.parse(text) as T);
@@ -74,7 +73,7 @@ const stored = <T,>(key: string, fallback: T): T => {
     return fallback;
   }
 };
-const store = (key: string, value: unknown): void => {
+export const store = (key: string, value: unknown): void => {
   try {
     localStorage.setItem(`contextory.${key}`, JSON.stringify(value));
   } catch {
@@ -100,6 +99,9 @@ export interface ViewTabsProps {
   readonly patchType: (name: string, patch: ObjectTypePatch) => void;
   /** 確かめてからゴミ箱へ移す。 */
   readonly trash: (object: ObjectSummary) => void;
+  /** 端末をまたいで共有する画面の状態（前回開いたView、畳んだ行）。 */
+  readonly shared: Readonly<Record<string, unknown>>;
+  readonly share: (key: string, value: unknown) => void;
 }
 
 /** 種別のページとObjectのページに並べる、Viewのタブと中身。 */
@@ -116,26 +118,18 @@ export const ViewTabs = ({
   act,
   patchType,
   trash,
+  shared,
+  share,
 }: ViewTabsProps): React.JSX.Element => {
   const views = owner.views.filter((candidate) => candidate.scope === scope);
   /** 前回開いていたView。種別とページの範囲ごとに覚える。 */
   const selectedKey = `view:${owner.name}:${scope}`;
-  const [selected, setSelected] = useState(() =>
-    stored<string | null>(selectedKey, null),
-  );
-  const choose = (id: string): void => {
-    setSelected(id);
-    store(selectedKey, id);
-  };
+  const selected = shared[selectedKey];
+  const choose = (id: string): void => share(selectedKey, id);
   /** 絞り込みの窓で開いているField */
   const [filtering, setFiltering] = useState<string | null>(null);
   /** 並べ替えの窓で、キーを選び直している段 */
   const [sorting, setSorting] = useState<number | null>(null);
-  /** 階層で、配下を畳んでいる行。Viewごとに覚える。 */
-  const [folds, setFolds] = useState<{
-    readonly viewId: string;
-    readonly ids: ReadonlySet<string>;
-  } | null>(null);
   /** 追加行の入力と、候補の中で選んでいる位置 */
   const [newText, setNewText] = useState("");
   const [pick, setPick] = useState(0);
@@ -145,10 +139,11 @@ export const ViewTabs = ({
   } | null>(null);
   const view = views.find((candidate) => candidate.id === selected) ?? views[0];
   const viewId = view?.id;
-  const folded =
-    folds && folds.viewId === viewId
-      ? folds.ids
-      : new Set(viewId ? stored<string[]>(`fold:${viewId}`, []) : []);
+  /** 階層で、配下を畳んでいる行。Viewごとに覚える。 */
+  const foldKey = `fold:${viewId ?? ""}`;
+  const folded = new Set(
+    Array.isArray(shared[foldKey]) ? (shared[foldKey] as string[]) : [],
+  );
 
   useEffect(() => {
     if (!viewId) return;
@@ -890,8 +885,7 @@ export const ViewTabs = ({
               const next = new Set(folded);
               if (closed) next.delete(object.id);
               else next.add(object.id);
-              setFolds({ viewId: view.id, ids: next });
-              store(`fold:${view.id}`, [...next]);
+              share(foldKey, [...next]);
             }}
           >
             {parent ? (closed ? "▸" : "▾") : ""}
@@ -942,15 +936,44 @@ export const ViewTabs = ({
         >
           ↗
         </button>
-        <button
-          type="button"
-          className="od-cell-open"
-          aria-label={`${object.title}をゴミ箱へ移す`}
-          title="ゴミ箱へ移す"
-          onClick={() => trash(object)}
+        <Popover
+          className="od-cell-more"
+          label="⋯"
+          ariaLabel={`${object.title}のメニュー`}
         >
-          ×
-        </button>
+          {(close) => (
+            <div className="od-menu">
+              <h3>種別を変える</h3>
+              {types.map((definition) => (
+                <CheckItem
+                  key={definition.name}
+                  checked={object.type === definition.name}
+                  onChange={() => {
+                    close();
+                    if (object.type !== definition.name)
+                      act(() =>
+                        client.patchObject(object.id, {
+                          type: definition.name,
+                        }),
+                      );
+                  }}
+                >
+                  #{typeLabel(definition.name)}
+                </CheckItem>
+              ))}
+              <button
+                type="button"
+                className="od-danger"
+                onClick={() => {
+                  close();
+                  trash(object);
+                }}
+              >
+                ゴミ箱へ移す
+              </button>
+            </div>
+          )}
+        </Popover>
       </span>
     );
   };
@@ -1100,10 +1123,9 @@ export const ViewTabs = ({
                     target ? `#${typeLabel(target.name)}を追加` : "Objectを追加"
                   }
                   placeholder={
-                    target
-                      ? `＋ #${typeLabel(target.name)}を追加（「#種別 Title」でほかの種別）`
-                      : "＋ 「#種別 Title」で追加"
+                    target ? `＋ #${typeLabel(target.name)}` : "＋ 追加"
                   }
+                  title="「#種別 Title」で、ほかの種別も追加できる"
                   onKeyDown={(event) => {
                     if (event.nativeEvent.isComposing) return;
                     // 候補が出ている間は、矢印で選び、EnterかTabで種別を入れる。
@@ -1208,22 +1230,21 @@ export const ViewTabs = ({
     if (entry.kind === "unit")
       return (
         <li
-          className="od-row"
+          className="od-card"
           data-type="mention"
           key={`${entry.hostId}-${entry.unitId}`}
         >
-          <span className="od-type">
-            {entry.unitKind === "section" ? "見出し" : "言及"}
-          </span>
           <button type="button" onClick={() => open(entry.hostId)}>
-            <strong>{entry.text}</strong>
-            <small>
-              {[entry.hostTitle, viaNote(entry.via)]
-                .filter(Boolean)
-                .join(" · ")}
-            </small>
+            <span className="od-card-head">
+              <span className="od-type">
+                {entry.unitKind === "section" ? "見出し" : "言及"}
+              </span>
+              <strong>{entry.hostTitle}</strong>
+              <time>{formatTime(entry.time)}</time>
+            </span>
+            <span className="od-excerpt">{entry.text}</span>
+            {entry.via.length ? <small>{viaNote(entry.via)}</small> : null}
           </button>
-          <time>{formatTime(entry.time)}</time>
         </li>
       );
     const { object } = entry;
@@ -1231,27 +1252,55 @@ export const ViewTabs = ({
       ? [entry.field ? `${entry.field}で言及` : "言及", viaNote(entry.via)]
           .filter(Boolean)
           .join(" · ")
-      : viaNote(entry.via) || (anchorId ? "直接" : "");
+      : viaNote(entry.via);
+    const checkbox = typeOf(object.type)?.checkbox;
     return (
       <li
-        className="od-row"
+        className="od-card"
         data-type={object.type}
         data-color={typeOf(object.type)?.color ?? undefined}
+        data-done={checkbox && object.done}
         key={object.id}
       >
-        <span className="od-type">{typeLabel(object.type)}</span>
         <button type="button" onClick={() => open(object.id)}>
-          <strong>{object.title}</strong>
+          <span className="od-card-head">
+            <span className="od-type">{typeLabel(object.type)}</span>
+            <strong>{object.title}</strong>
+            {checkbox && object.done ? (
+              <span className="od-row-status">完了</span>
+            ) : null}
+            <time>{formatTime(entry.time)}</time>
+          </span>
+          {entry.excerpt ? (
+            <span className="od-excerpt">{entry.excerpt}</span>
+          ) : null}
           {note ? <small>{note}</small> : null}
         </button>
-        {typeOf(object.type)?.checkbox ? (
-          <span className="od-row-status" data-done={object.done}>
-            {object.done ? "完了" : "未完了"}
-          </span>
-        ) : null}
-        <time>{formatTime(entry.time)}</time>
       </li>
     );
+  };
+  /** 日付の見出しを挟んで並べる。 */
+  const dayLabel = (time: number): string =>
+    new Intl.DateTimeFormat("ja-JP", {
+      month: "long",
+      day: "numeric",
+      weekday: "short",
+    }).format(new Date(time));
+  const timeline = (entries: readonly ObjectTimelineEntry[]) => {
+    const items: React.JSX.Element[] = [];
+    let last = "";
+    for (const entry of entries) {
+      const day = dayLabel(entry.time);
+      if (day !== last)
+        items.push(
+          <li key={`day-${day}`} className="od-day">
+            {day}
+          </li>,
+        );
+      last = day;
+      items.push(entryRow(entry));
+    }
+    return items;
   };
 
   return (
@@ -1266,7 +1315,7 @@ export const ViewTabs = ({
       {table ? (
         tableView
       ) : data?.entries.length ? (
-        <ul className="od-rows">{data.entries.map(entryRow)}</ul>
+        <ul className="od-timeline">{timeline(data.entries)}</ul>
       ) : (
         <p className="od-empty">まだありません。</p>
       )}

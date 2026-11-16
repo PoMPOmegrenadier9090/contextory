@@ -6,6 +6,9 @@ import { createHttpObjectClient } from "@pkm/core";
 import "../../../packages/ui/src/object-app.css";
 import "../../../packages/editor/src/editor.css";
 
+// SafariはviewportのUser-scalableを無視するので、ピンチでの拡大をここで止める。
+document.addEventListener("gesturestart", (event) => event.preventDefault());
+
 const root = document.querySelector<HTMLDivElement>("#root");
 if (root === null) throw new Error("Web application root is missing");
 

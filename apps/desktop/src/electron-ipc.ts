@@ -122,6 +122,10 @@ export const registerDesktopIpc = ({
     const { from, to } = parseObjectOverviewRange(request);
     return client().overview(from, to);
   });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.uiState, () => client().uiState());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.setUiState, (_event, key, value) =>
+    client().setUiState(requireRequestString(key, "key"), value),
+  );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.connectionGet, () => connection.get());
   ipcMain.handle(DESKTOP_IPC_CHANNELS.connectionSave, (_event, input) =>
     connection.save(input),

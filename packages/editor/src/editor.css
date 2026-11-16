@@ -231,7 +231,8 @@
 }
 
 /* チェックボックスのある種別は、行末の矢印で開く。 */
-.pe-open {
+.pe-open,
+.pe-more {
   display: grid;
   place-items: center;
   width: 24px;
@@ -245,19 +246,39 @@
   opacity: 0;
 }
 
-.pe-open:hover {
+.pe-more {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.pe-open:hover,
+.pe-more:hover {
   color: var(--pe-type);
   background: color-mix(in srgb, var(--pe-type) 14%, transparent);
 }
 
 .pe-object:hover > .pe-object-side > .pe-open,
-.pe-open:focus-visible {
+.pe-object:hover > .pe-object-side > .pe-more,
+.pe-object[data-selected="true"] > .pe-object-side > .pe-more,
+.pe-open:focus-visible,
+.pe-more:focus-visible {
   opacity: 1;
+}
+
+/* ブロックごと選んだObject。⌫で消し、⌘Xで切り取れる。 */
+.pe-object[data-selected="true"] {
+  background: color-mix(in srgb, var(--pe-type) 12%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pe-type) 45%, transparent);
+}
+
+.pe-editor .tiptap .ProseMirror-selectednode {
+  outline: none;
 }
 
 @media (hover: none) {
   .pe-toggle,
-  .pe-open {
+  .pe-open,
+  .pe-more {
     opacity: 1;
   }
 }
@@ -371,17 +392,21 @@
 
 .pe-context {
   max-width: 160px;
-  padding: 1px 8px;
+  padding: 0 4px;
   overflow: hidden;
-  color: var(--pe-type);
+  color: var(--pe-muted);
   font: inherit;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--pe-surface);
-  border: 1px solid var(--pe-line);
-  border-radius: 999px;
+  background: none;
+  border: 0;
   cursor: pointer;
+}
+
+/* 置いた文書と違うContextだけを、Titleの後ろに小さな文字で添える。 */
+.pe-context::before {
+  content: "· ";
 }
 
 /* @ / # menu */
@@ -427,4 +452,52 @@
   color: var(--pe-muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.pe-block-menu {
+  width: 220px;
+}
+
+.pe-menu.pe-block-menu button {
+  display: flex;
+  justify-content: space-between;
+}
+
+.pe-block-menu button:hover {
+  background: var(--pe-subtle);
+}
+
+.pe-block-menu button[data-danger="true"] {
+  color: #a3423a;
+}
+
+/* タッチの端末で、キーボードの上に浮かべる書式のボタン。 */
+.pe-input-bar {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  overflow-x: auto;
+  background: var(--pe-surface, #fffefa);
+  border: 1px solid var(--pe-line, #ddd9cf);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+}
+
+.pe-input-bar button {
+  min-width: 40px;
+  height: 36px;
+  padding: 0 8px;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+}
+
+.pe-input-bar button[aria-pressed="true"] {
+  background: var(--pe-subtle, #f8f6f1);
 }

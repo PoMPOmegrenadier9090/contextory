@@ -222,6 +222,19 @@ describe("object API", () => {
         .statusCode,
     ).toBe(404);
 
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/api/next/state/view%3Atask%3Atype",
+          payload: { value: "v1" },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect((await app.inject({ url: "/api/next/state" })).json()).toEqual({
+      "view:task:type": "v1",
+    });
+
     const backup = await app.inject({ url: "/api/next/backup" });
     expect(backup.headers["content-disposition"]).toMatch(/\.sqlite"$/);
     expect(backup.rawPayload.subarray(0, 15).toString()).toBe(

@@ -25,5 +25,7 @@ export const localObjectClient = (store: ObjectStore): ObjectClient => {
     updateType: (name, patch) => run(() => store.updateType(name, patch)),
     deleteType: (name) => run(() => store.deleteType(name)),
     overview: (from, to) => run(() => store.overview(from, to)),
+    uiState: () => run(() => store.uiState()),
+    setUiState: (key, value) => run(() => store.setUiState(key, value)),
   };
 };

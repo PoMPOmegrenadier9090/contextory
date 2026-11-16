@@ -114,7 +114,7 @@ describe("ObjectStore", () => {
     expect(page.objects.new?.contexts).toEqual(["project"]);
   });
 
-  it("keeps contexts on later saves and keeps objects removed from the document", () => {
+  it("keeps contexts on later saves and trashes objects removed from the document", () => {
     const tree = doc(block("new", "task", "a", block("child", "task", "b")));
     store.savePage(DAILY, tree, 10);
     store.addContext("new", "project");
@@ -124,6 +124,15 @@ describe("ObjectStore", () => {
       createdAt: 10,
     });
     store.savePage(DAILY, doc(), 30);
+    // 外れたObjectはゴミ箱へ移る。取り消しで戻すと、作成日時とContextが残る。
+    expect(
+      store
+        .trash()
+        .map((o) => o.id)
+        .sort(),
+    ).toEqual(["child", "new"]);
+    store.savePage(DAILY, tree, 40);
+    expect(store.trash()).toEqual([]);
     expect(store.getObject("new")).toMatchObject({
       contexts: ["project"],
       createdAt: 10,
@@ -503,10 +512,16 @@ describe("ObjectStore", () => {
         .queryView(views[0]!.id, null, "2026-11-12")
         .rows.map((row) => row.object.id),
     ).toEqual(["other", "project"]);
-    // ObjectのページのTimelineは、これまでのTimelineと同じ内容になる。
+    // ObjectのページのTimelineは、これまでのTimelineに本文の先頭を足したものになる。
+    const entries = store.queryView(
+      views[1]!.id,
+      "project",
+      "2026-11-12",
+    ).entries;
+    expect(entries).toMatchObject(store.timeline("project"));
     expect(
-      store.queryView(views[1]!.id, "project", "2026-11-12").entries,
-    ).toEqual(store.timeline("project"));
+      entries.find((e) => e.kind === "object" && e.object.id === "memo"),
+    ).toMatchObject({ excerpt: "project" });
     expect(() => store.queryView(views[1]!.id, null, "2026-11-12")).toThrow(
       ObjectStoreError,
     );
@@ -667,6 +682,33 @@ describe("ObjectStore", () => {
     expect(byPath.get("daily/2026-11-12.md")).toBe(
       "# 2026-11-12\n\n[task](../objects/task/task-task.md) を進める\n\n関係ない段落\n",
     );
+  });
+
+  it("changes an object's type and drops fields the new type lacks", () => {
+    store.updateType("task", {
+      fields: [{ id: "due", name: "期限", kind: "text" }],
+    });
+    store.patchObject("task", { fields: { due: [text("明日")] } }, 10);
+    expect(store.patchObject("task", { type: "decision" }, 11)).toMatchObject({
+      type: "decision",
+      contexts: ["project"],
+    });
+    store.patchObject("task", { type: "task" }, 12);
+    expect(
+      store
+        .loadPage("task")
+        .doc.content?.find((node) => node.attrs?.fieldId === "due")?.content,
+    ).toBeUndefined();
+  });
+
+  it("keeps the shared UI state", () => {
+    store.setUiState("view:task:type", "v1");
+    store.setUiState("fold:v1", ["a"]);
+    store.setUiState("view:task:type", "v2");
+    expect(store.uiState()).toEqual({
+      "view:task:type": "v2",
+      "fold:v1": ["a"],
+    });
   });
 
   it("refuses contexts that would create a cycle and unknown hosts", () => {

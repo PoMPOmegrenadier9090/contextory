@@ -94,5 +94,8 @@ export const createHttpObjectClient = ({
     deleteType: (name) => request<void>("DELETE", `/types/${encode(name)}`),
     overview: (from, to) =>
       request<ObjectOverview>("GET", `/overview?from=${from}&to=${to}`),
+    uiState: () => request<Record<string, unknown>>("GET", "/state"),
+    setUiState: (key, value) =>
+      request<void>("PUT", `/state/${encode(key)}`, { value }),
   };
 };

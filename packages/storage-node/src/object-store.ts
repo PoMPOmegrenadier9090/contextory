@@ -40,7 +40,7 @@ import {
 
 import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 6;
+export const OBJECT_STORE_SCHEMA_VERSION = 7;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const DOCUMENT_ID = /^daily:\d{4}-\d{2}-\d{2}$/;
@@ -235,6 +235,17 @@ export class ObjectStore {
         this.database.exec("ALTER TABLE objects ADD COLUMN deleted_at INTEGER");
         this.database.pragma("user_version = 6");
       })();
+    if (version < 7)
+      this.database.transaction(() => {
+        // 前回開いたViewや畳んだ行など、端末をまたいで共有する画面の状態。
+        this.database.exec(`
+          CREATE TABLE ui_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          ) WITHOUT ROWID;
+        `);
+        this.database.pragma("user_version = 7");
+      })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
   }
 
@@ -304,6 +315,29 @@ export class ObjectStore {
       contexts: this.contextsOf(row.id),
       createdAt: row.created_at,
     };
+  }
+
+  /** 本文の先頭の文字。埋め込んだObjectはTitleにする。 */
+  private excerpt(row: ObjectRow, limit = 160): string {
+    const parts: string[] = [];
+    const walk = (list: readonly DocNode[]): void => {
+      for (const node of list) {
+        if (parts.join(" ").length > limit) return;
+        if (node.type === "objectEmbed") {
+          const embedded = this.row(String(node.attrs?.objectId));
+          if (embedded) parts.push(this.text(nodes(embedded.title)));
+        } else if (
+          node.content?.some(
+            (child) => child.type === "text" || child.type === "objectRef",
+          )
+        )
+          parts.push(this.text(node.content));
+        else walk(node.content ?? []);
+      }
+    };
+    walk(nodes(row.body));
+    const text = parts.filter(Boolean).join(" ");
+    return text.length > limit ? `${text.slice(0, limit)}…` : text;
   }
 
   private hostBody(hostId: string): readonly DocNode[] {
@@ -645,8 +679,8 @@ export class ObjectStore {
 
   /**
    * 編集した文書木を保存する。Object単位へ分け、初めて現れたObjectは
-   * 置かれた場所からContextを継承して作る。この文書から外れたObjectは消さず、
-   * 置き場所の無いObjectとして残す。
+   * 置かれた場所からContextを継承して作る。この文書から外れ、ほかのどこにも
+   * 置かれていないObjectはゴミ箱へ移す。
    */
   savePage(
     hostId: string,
@@ -666,6 +700,7 @@ export class ObjectStore {
       const host = this.row(hostId);
       this.hostBody(hostId); // 存在しないhostならここで失敗させる
       const split = splitDocument(doc);
+      const previous = this.placedIds(hostId);
       const saved = new Set<string>();
       const ensure = (id: string): void => {
         const content = split.objects[id];
@@ -716,6 +751,22 @@ export class ObjectStore {
           .run(hostId, body, now);
       this.reindex(hostId, now);
       for (const id of saved) this.reindex(id, now);
+
+      // 外れてほかのどこにも置かれていないObjectは、ゴミ箱へ移す。
+      // 取り消しや貼り付けで戻れば、上のupsertObjectがゴミ箱から戻す。
+      const removed = previous.filter((id) => !saved.has(id));
+      const placedElsewhere = this.database.prepare(
+        `SELECT 1 FROM placements WHERE object_id = ?
+         AND host_id NOT IN (SELECT value FROM json_each(?))`,
+      );
+      const removedJson = JSON.stringify(removed);
+      for (const id of removed)
+        if (!placedElsewhere.get(id, removedJson))
+          this.database
+            .prepare(
+              "UPDATE objects SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+            )
+            .run(now, id);
     })();
     return this.loadPage(hostId);
   }
@@ -759,9 +810,10 @@ export class ObjectStore {
   patchObject(id: string, patch: ObjectPatch, now: number): ObjectSummary {
     this.database.transaction(() => {
       const row = this.requireRow(id);
+      const type = patch.type ?? row.type;
       this.upsertObject(
         id,
-        row.type,
+        type,
         patch.title === undefined
           ? nodes(row.title)
           : patch.title
@@ -779,6 +831,14 @@ export class ObjectStore {
           value,
         })),
       );
+      if (type !== row.type)
+        // 新しい種別に無いFieldの値は消す。
+        this.database
+          .prepare(
+            `DELETE FROM field_values WHERE object_id = ?
+             AND field_id NOT IN (SELECT value FROM json_each(?))`,
+          )
+          .run(id, JSON.stringify(this.fieldsOf(type).map((f) => f.id)));
       this.reindex(id, now);
     })();
     return this.getObject(id);
@@ -990,6 +1050,14 @@ export class ObjectStore {
             entry.kind === "object"
               ? matches(item(this.requireRow(entry.object.id)))
               : !narrowed,
+          )
+          .map((entry) =>
+            entry.kind === "object"
+              ? {
+                  ...entry,
+                  excerpt: this.excerpt(this.requireRow(entry.object.id)),
+                }
+              : entry,
           )
           .sort((a, b) => b.time - a.time),
         objects: {},
@@ -1390,6 +1458,27 @@ export class ObjectStore {
       if (text) files.push({ path, text: `# ${date}\n\n${text}\n` });
     }
     return files;
+  }
+
+  /** 端末をまたいで共有する画面の状態。 */
+  uiState(): Record<string, unknown> {
+    return Object.fromEntries(
+      (
+        this.database.prepare("SELECT key, value FROM ui_state").all() as {
+          key: string;
+          value: string;
+        }[]
+      ).map(({ key, value }) => [key, JSON.parse(value) as unknown]),
+    );
+  }
+
+  setUiState(key: string, value: unknown): void {
+    this.database
+      .prepare(
+        `INSERT INTO ui_state (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(key, JSON.stringify(value ?? null));
   }
 
   /** 書き込み中でも整ったDBの複製を作る。 */

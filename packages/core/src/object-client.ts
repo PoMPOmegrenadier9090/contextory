@@ -44,6 +44,8 @@ export interface ViewResult {
 
 export interface ObjectPatch {
   readonly title?: string;
+  /** 種別を変える。新しい種別に無いFieldの値は消える。 */
+  readonly type?: string;
   readonly done?: boolean;
   /** FieldのIDごとの新しい値。Contextは参照の並びで渡す。 */
   readonly fields?: Readonly<Record<string, readonly DocNode[]>>;
@@ -100,4 +102,7 @@ export interface ObjectClient {
   /** ユーザーが作った種別を消す。その種別のObjectが残っていれば断られる。 */
   deleteType(name: string): Promise<void>;
   overview(from: number, to: number): Promise<ObjectOverview>;
+  /** 前回開いたViewや畳んだ行など、端末をまたいで共有する画面の状態。 */
+  uiState(): Promise<Readonly<Record<string, unknown>>>;
+  setUiState(key: string, value: unknown): Promise<void>;
 }
