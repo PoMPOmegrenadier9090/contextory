@@ -38,6 +38,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type RefObject,
@@ -1239,14 +1240,18 @@ const blockItems = (
 /** タッチの端末だけで、キーボードのすぐ上に書式のボタンを浮かべる。 */
 const InputBar = ({
   editor,
+  hidden,
   onMore,
 }: {
   readonly editor: Editor | null;
+  /** @や#の候補が出ている間は、候補を隠さないよう引っ込める。 */
+  readonly hidden: boolean;
   readonly onMore: (x: number, y: number) => void;
 }): React.JSX.Element | null => {
   const [place, setPlace] = useState<{
     readonly top: number;
-    readonly left: number;
+    /** 帯の中央の位置 */
+    readonly center: number;
     readonly width: number;
   } | null>(null);
   const bar = useRef<HTMLDivElement>(null);
@@ -1258,37 +1263,54 @@ const InputBar = ({
       return;
     const viewport = window.visualViewport;
     let frame = 0;
+    let scrolling: ReturnType<typeof setTimeout> | undefined;
     const update = (): void => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (editor.isDestroyed || !editor.view.hasFocus())
+        if (
+          scrolling !== undefined ||
+          editor.isDestroyed ||
+          !editor.view.hasFocus()
+        )
           return setPlace(null);
         const width = viewport?.width ?? window.innerWidth;
         const bottom =
           (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
         setPlace({
-          top: bottom - (bar.current?.offsetHeight ?? 44) - 8,
-          left: (viewport?.offsetLeft ?? 0) + 12,
+          top: bottom - (bar.current?.offsetHeight ?? 46) - 8,
+          center: (viewport?.offsetLeft ?? 0) + width / 2,
           width: width - 24,
         });
       });
+    };
+    // スクロールしている間は隠し、止まってから出し直す。
+    const scroll = (): void => {
+      clearTimeout(scrolling);
+      setPlace(null);
+      scrolling = setTimeout(() => {
+        scrolling = undefined;
+        update();
+      }, 200);
     };
     editor.on("selectionUpdate", update);
     // エディタの外へ移ったときも閉じられるよう、ページのフォーカスを見る。
     document.addEventListener("focusin", update);
     document.addEventListener("focusout", update);
     viewport?.addEventListener("resize", update);
-    viewport?.addEventListener("scroll", update);
+    viewport?.addEventListener("scroll", scroll);
+    window.addEventListener("scroll", scroll, true);
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(scrolling);
+      window.removeEventListener("scroll", scroll, true);
       editor.off("selectionUpdate", update);
       document.removeEventListener("focusin", update);
       document.removeEventListener("focusout", update);
       viewport?.removeEventListener("resize", update);
-      viewport?.removeEventListener("scroll", update);
+      viewport?.removeEventListener("scroll", scroll);
     };
   }, [editor]);
-  if (!editor || !place) return null;
+  if (!editor || !place || hidden) return null;
   const buttons: readonly [string, string, () => void, string?][] = [
     ["太字", "B", () => editor.chain().focus().toggleBold().run(), "bold"],
     ["斜体", "I", () => editor.chain().focus().toggleItalic().run(), "italic"],
@@ -1324,7 +1346,12 @@ const InputBar = ({
       className="pe-input-bar"
       role="toolbar"
       aria-label="本文の書式"
-      style={{ top: place.top, left: place.left, maxWidth: place.width }}
+      style={{
+        top: place.top,
+        left: place.center,
+        maxWidth: place.width,
+        transform: "translateX(-50%)",
+      }}
     >
       {buttons.map(([label, text, run, mark]) => (
         <button
@@ -1365,6 +1392,23 @@ export const ObjectEditor = ({
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [active, setActive] = useState(0);
   const [blockMenu, setBlockMenu] = useState<BlockMenu | null>(null);
+  const blockMenuRef = useRef<HTMLDivElement>(null);
+  // 実際の大きさを測って、押した位置から画面の内側へ開く。下に入らなければ上へ開く。
+  useLayoutEffect(() => {
+    const element = blockMenuRef.current;
+    if (!element || !blockMenu || blockMenu.above) return;
+    const { width, height } = element.getBoundingClientRect();
+    const left =
+      blockMenu.x + width > window.innerWidth - 8
+        ? blockMenu.x - width
+        : blockMenu.x;
+    const top =
+      blockMenu.y + height > window.innerHeight - 8
+        ? blockMenu.y - height
+        : blockMenu.y;
+    element.style.left = `${Math.max(8, left)}px`;
+    element.style.top = `${Math.max(8, top)}px`;
+  }, [blockMenu]);
   const editorRef = useRef<Editor | null>(null);
   const [openBlockMenu] = useState(
     () =>
@@ -1502,6 +1546,7 @@ export const ObjectEditor = ({
       </BlockMenuContext.Provider>
       <InputBar
         editor={editor}
+        hidden={menu !== null}
         onMore={(x, y) => {
           if (editor)
             openBlockMenu(editor.state.selection.from, x, y, undefined, true);
@@ -1509,18 +1554,14 @@ export const ObjectEditor = ({
       />
       {blockMenu ? (
         <div
+          ref={blockMenuRef}
           className="pe-menu pe-block-menu"
           role="menu"
           style={{
-            left: Math.max(8, Math.min(blockMenu.x, window.innerWidth - 240)),
+            left: Math.max(8, Math.min(blockMenu.x, window.innerWidth - 228)),
             ...(blockMenu.above
               ? { bottom: window.innerHeight - blockMenu.y }
-              : {
-                  top: Math.max(
-                    8,
-                    Math.min(blockMenu.y, window.innerHeight - 320),
-                  ),
-                }),
+              : { top: blockMenu.y }),
           }}
           onMouseDown={(event) => event.preventDefault()}
         >
