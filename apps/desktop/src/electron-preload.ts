@@ -32,11 +32,12 @@ const api: DesktopApi = {
       ? Promise.resolve(result.page)
       : Promise.reject(new Error(result.error));
   },
-  searchObjects: (query, exclude = null) =>
+  searchObjects: (query, exclude = null, limit) =>
     invoke<readonly ObjectSummary[]>(
       DESKTOP_IPC_CHANNELS.objectSearch,
       query,
       exclude,
+      limit,
     ),
   createObject: (input) =>
     invoke<ObjectSummary>(DESKTOP_IPC_CHANNELS.objectCreate, input),

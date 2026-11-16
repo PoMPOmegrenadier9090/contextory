@@ -63,14 +63,18 @@ export const registerDesktopIpc = ({
   );
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.objectSearch,
-    (_event, query: unknown, exclude: unknown) => {
+    (_event, query: unknown, exclude: unknown, limit: unknown) => {
       if (typeof query !== "string")
         throw new TypeError("query must be a string");
       const excluded =
         exclude === null || exclude === undefined
           ? null
           : requireRequestString(exclude, "exclude");
-      return client().searchObjects(query, excluded);
+      return client().searchObjects(
+        query,
+        excluded,
+        typeof limit === "number" ? limit : undefined,
+      );
     },
   );
   ipcMain.handle(DESKTOP_IPC_CHANNELS.objectCreate, (_event, request) =>

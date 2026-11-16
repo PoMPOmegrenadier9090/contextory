@@ -9,8 +9,8 @@ export const localObjectClient = (store: ObjectStore): ObjectClient => {
     loadPage: (hostId) => run(() => store.loadPage(hostId)),
     savePage: (hostId, doc, baseRevision) =>
       run(() => store.savePage(hostId, doc, Date.now(), baseRevision)),
-    searchObjects: (query, exclude = null) =>
-      run(() => store.search(query, exclude)),
+    searchObjects: (query, exclude = null, limit) =>
+      run(() => store.search(query, exclude, limit)),
     createObject: (input) => run(() => store.createObject(input, Date.now())),
     patchObject: (id, patch) =>
       run(() => store.patchObject(id, patch, Date.now())),

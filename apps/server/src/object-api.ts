@@ -58,6 +58,7 @@ export const registerObjectRoutes = (
     return store.search(
       typeof query.query === "string" ? query.query : "",
       typeof query.exclude === "string" ? query.exclude : null,
+      Number(query.limit),
     );
   });
   app.post("/api/next/objects", (request, reply) => {

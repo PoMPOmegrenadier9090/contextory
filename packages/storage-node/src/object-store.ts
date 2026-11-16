@@ -949,7 +949,12 @@ export class ObjectStore {
            AND (type != 'memo' OR ? != '')
          ORDER BY created_at DESC LIMIT ?`,
       )
-      .all(pattern, excludeId, query, limit) as ObjectRow[];
+      .all(
+        pattern,
+        excludeId,
+        query,
+        Number.isSafeInteger(limit) && limit > 0 ? Math.min(100, limit) : 6,
+      ) as ObjectRow[];
     return rows.map((row) => this.summary(row));
   }
 

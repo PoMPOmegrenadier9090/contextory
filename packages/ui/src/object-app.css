@@ -1450,3 +1450,53 @@ html {
 .od-demo .od-cell-refs .od-pop > button {
   color: var(--od-muted);
 }
+
+.od-search-dialog {
+  width: min(540px, calc(100% - 32px));
+  max-height: min(620px, calc(100% - 32px));
+  overflow: auto;
+  padding: 16px;
+  color: var(--od-ink);
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 12px;
+  overscroll-behavior: contain;
+}
+
+.od-search-dialog::backdrop {
+  background: color-mix(in srgb, var(--od-ink) 24%, transparent);
+}
+
+body:has(.od-search-dialog:modal) {
+  overflow: hidden;
+}
+
+.od-search-dialog header,
+.od-search-dialog li button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.od-search-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.od-search-dialog input,
+.od-search-dialog li button {
+  width: 100%;
+  padding: 8px 10px;
+}
+
+.od-search-dialog ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.od-search-dialog small,
+.od-search-dialog p {
+  color: var(--od-muted);
+}

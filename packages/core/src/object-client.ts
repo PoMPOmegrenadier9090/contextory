@@ -74,6 +74,7 @@ export interface ObjectClient {
   searchObjects(
     query: string,
     exclude?: string | null,
+    limit?: number,
   ): Promise<readonly ObjectSummary[]>;
   createObject(input: {
     readonly id: string;

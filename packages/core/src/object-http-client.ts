@@ -68,10 +68,10 @@ export const createHttpObjectClient = ({
         { doc, baseRevision },
         keepalive,
       ),
-    searchObjects: (query, exclude = null) =>
+    searchObjects: (query, exclude = null, limit) =>
       request<readonly ObjectSummary[]>(
         "GET",
-        `/objects?query=${encode(query)}${exclude ? `&exclude=${encode(exclude)}` : ""}`,
+        `/objects?query=${encode(query)}${exclude ? `&exclude=${encode(exclude)}` : ""}${limit === undefined ? "" : `&limit=${encode(String(limit))}`}`,
       ),
     createObject: (input) => request<ObjectSummary>("POST", "/objects", input),
     patchObject: (id, patch) =>

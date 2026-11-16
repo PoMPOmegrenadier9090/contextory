@@ -25,6 +25,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { captureMemo, emptyBody, type CaptureInput } from "./capture.js";
 import { DayMemoCard } from "./day-memo.js";
+import { ObjectSearch } from "./object-search.js";
 import {
   dailyDate,
   dailyHostId,
@@ -872,6 +873,7 @@ export const ObjectApp = ({
           </span>
         </div>
         <div className="od-topbar-actions">
+          <ObjectSearch client={client} open={open} />
           <button
             type="button"
             title="Memoを書く（⌘⇧M）"
