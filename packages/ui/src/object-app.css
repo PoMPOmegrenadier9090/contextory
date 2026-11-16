@@ -5,6 +5,12 @@ body,
   margin: 0;
 }
 
+html {
+  /* ピンチとダブルタップでの拡大を止める。スクロールはそのまま。 */
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+}
+
 /* WebとDesktopで共有するObject画面。 */
 .od-demo {
   --od-bg: #f3f1ec;
@@ -149,8 +155,8 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 56px;
-  padding: 8px 20px;
+  min-height: 44px;
+  padding: 4px 12px;
   background: color-mix(in srgb, var(--od-surface) 94%, transparent);
   border-bottom: 1px solid var(--od-line);
   backdrop-filter: blur(14px);
@@ -175,11 +181,19 @@ body,
   border-left: 1px solid var(--od-line-strong);
 }
 
+.od-topbar-actions {
+  gap: 4px;
+}
+
 .od-topbar-actions a,
 .od-topbar-actions button {
-  padding: 6px 12px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   color: var(--od-ink);
-  font-size: 13px;
+  font-size: 16px;
   text-decoration: none;
   background: var(--od-surface);
   border: 1px solid var(--od-line-strong);
@@ -252,12 +266,73 @@ body,
 .od-shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  min-height: calc(100vh - 56px);
+  min-height: calc(100vh - 44px);
+}
+
+.od-shell[data-nav="closed"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.od-nav[hidden],
+.od-nav-backdrop {
+  display: none;
+}
+
+.od-demo .od-menu-toggle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 18px;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+}
+
+.od-demo .od-menu-toggle:hover {
+  background: var(--od-subtle);
+}
+
+.od-topbar > div:first-child {
+  gap: 8px;
+  min-width: 0;
+}
+
+.od-save-status {
+  white-space: nowrap;
+}
+
+.od-nav .od-nav-settings {
+  margin-top: 16px;
+  color: var(--od-muted);
+  font-size: 13px;
+}
+
+.od-settings {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.od-settings dt {
+  color: var(--od-muted);
+}
+
+.od-settings dd {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.od-settings a {
+  color: var(--od-accent);
 }
 
 .od-nav {
   position: sticky;
-  top: 56px;
+  top: 44px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -292,28 +367,6 @@ body,
 
 .od-nav .od-nav-project {
   padding-left: 22px;
-}
-
-.od-keys {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 10px;
-  margin: 24px 0 0;
-  padding: 12px;
-  color: var(--od-muted);
-  font-size: 12px;
-  background: var(--od-subtle);
-  border-radius: 8px;
-}
-
-.od-keys dt {
-  color: var(--od-ink);
-  font-family: ui-monospace, monospace;
-  font-weight: 600;
-}
-
-.od-keys dd {
-  margin: 0;
 }
 
 .od-nav-note {
@@ -543,16 +596,6 @@ body,
   white-space: nowrap;
 }
 
-.od-nav-downloads {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.od-nav-downloads a {
-  color: var(--od-muted);
-}
-
 .od-conflict {
   display: grid;
   gap: 8px;
@@ -581,32 +624,31 @@ body,
 
 @media (max-width: 760px) {
   .od-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
+  /* 狭い画面では、メニューを本文の上に重ねる。 */
   .od-nav {
-    position: static;
-    flex-flow: row wrap;
-    padding: 10px 16px 0;
+    position: fixed;
+    top: 44px;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(280px, 85vw);
+    overflow-y: auto;
+    background: var(--od-bg);
+    box-shadow: 8px 0 30px color-mix(in srgb, var(--od-ink) 18%, transparent);
   }
 
-  .od-nav button,
-  .od-nav > div {
-    width: auto;
+  .od-nav-backdrop {
+    position: fixed;
+    inset: 44px 0 0;
+    z-index: 39;
+    display: block;
+    background: color-mix(in srgb, var(--od-ink) 20%, transparent);
   }
 
-  .od-nav > div {
-    display: contents;
-  }
-
-  .od-nav .od-nav-area,
-  .od-nav .od-nav-project {
-    margin: 0;
-    padding-left: 10px;
-  }
-
-  .od-keys,
-  .od-nav-note {
+  .od-save-status[data-saved="true"] {
     display: none;
   }
 

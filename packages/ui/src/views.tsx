@@ -66,7 +66,7 @@ export const commitOnEnter = (
 };
 
 /** 開いていたViewや畳んだ行は、端末ごとの表示の状態としてブラウザーに残す。 */
-const stored = <T,>(key: string, fallback: T): T => {
+export const stored = <T,>(key: string, fallback: T): T => {
   try {
     const text = localStorage.getItem(`contextory.${key}`);
     return text === null ? fallback : (JSON.parse(text) as T);
@@ -74,7 +74,7 @@ const stored = <T,>(key: string, fallback: T): T => {
     return fallback;
   }
 };
-const store = (key: string, value: unknown): void => {
+export const store = (key: string, value: unknown): void => {
   try {
     localStorage.setItem(`contextory.${key}`, JSON.stringify(value));
   } catch {
@@ -1100,10 +1100,9 @@ export const ViewTabs = ({
                     target ? `#${typeLabel(target.name)}を追加` : "Objectを追加"
                   }
                   placeholder={
-                    target
-                      ? `＋ #${typeLabel(target.name)}を追加（「#種別 Title」でほかの種別）`
-                      : "＋ 「#種別 Title」で追加"
+                    target ? `＋ #${typeLabel(target.name)}` : "＋ 追加"
                   }
+                  title="「#種別 Title」で、ほかの種別も追加できる"
                   onKeyDown={(event) => {
                     if (event.nativeEvent.isComposing) return;
                     // 候補が出ている間は、矢印で選び、EnterかTabで種別を入れる。

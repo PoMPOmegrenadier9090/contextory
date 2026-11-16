@@ -32,9 +32,11 @@ import {
   localDate,
   shiftDate,
 } from "./object-date.js";
-import { commitOnEnter, KIND_LABEL, ViewTabs } from "./views.js";
+import { commitOnEnter, KIND_LABEL, store, stored, ViewTabs } from "./views.js";
 
 const isDaily = (hostId: string): boolean => dailyDate(hostId) !== null;
+/** 狭い画面では、メニューを本文の上に重ねて出す。 */
+const narrow = (): boolean => window.matchMedia("(max-width: 760px)").matches;
 
 /** 種別の設定。名前・色・Fieldを定義する。 */
 const TypeSettings = ({
@@ -140,10 +142,7 @@ const TypeSettings = ({
       </div>
       <section className="od-panel">
         <header>
-          <div>
-            <h2>Field</h2>
-            <p>上にあるものほど優先して見せる。外したFieldの値は消える</p>
-          </div>
+          <h2>Field</h2>
         </header>
         <ul className="od-fields">
           {fields.map((field, index) => (
@@ -151,7 +150,6 @@ const TypeSettings = ({
               {field.kind === "context" ? (
                 <>
                   <strong>{field.name}</strong>
-                  <small>すべての種別が持つ。推移的に集める</small>
                 </>
               ) : (
                 <>
@@ -260,12 +258,7 @@ const TypeSettings = ({
       {definition.builtin ? null : (
         <section className="od-panel">
           <header>
-            <div>
-              <h2>種別を削除</h2>
-              <p>
-                この種別のObjectをすべて完全に削除し、継承している種別も無ければ消せる。FieldとViewも消える
-              </p>
-            </div>
+            <h2>種別を削除</h2>
           </header>
           <button type="button" className="od-danger" onClick={onDelete}>
             #{typeLabel(definition.name)}を削除
@@ -324,6 +317,11 @@ export const ObjectApp = ({
     readonly name: string;
     readonly settings: boolean;
   } | null>(null);
+  /** 左のメニュー。広い画面での開閉は端末ごとに覚える。 */
+  const [menuOpen, setMenuOpen] = useState(
+    () => !narrow() && stored("nav", true),
+  );
+  const [settingsOpen, setSettingsOpen] = useState(false);
   /** 開いているゴミ箱の中身。nullならゴミ箱を開いていない。 */
   const [trashList, setTrashList] = useState<readonly ObjectSummary[] | null>(
     null,
@@ -768,6 +766,16 @@ export const ObjectApp = ({
     setCreateTitle("");
     open(id);
   };
+  const toggleMenu = (): void =>
+    setMenuOpen((last) => {
+      if (!narrow()) store("nav", !last);
+      return !last;
+    });
+  /** メニューから移る。狭い画面では、移ったらメニューを閉じる。 */
+  const go = (task: () => void) => (): void => {
+    if (narrow()) setMenuOpen(false);
+    task();
+  };
   const navButton = (
     object: ObjectSummary,
     className: string,
@@ -777,7 +785,7 @@ export const ObjectApp = ({
       type="button"
       className={className}
       aria-current={page === object.id ? "page" : undefined}
-      onClick={() => open(object.id)}
+      onClick={go(() => open(object.id))}
     >
       {object.title}
     </button>
@@ -786,10 +794,20 @@ export const ObjectApp = ({
     <div className="od-demo">
       <header className="od-topbar">
         <div>
+          <button
+            type="button"
+            className="od-menu-toggle"
+            aria-label={menuOpen ? "メニューを閉じる" : "メニューを開く"}
+            aria-expanded={menuOpen}
+            onClick={toggleMenu}
+          >
+            ☰
+          </button>
           <span className="od-product">Contextory</span>
           <span
             className="od-save-status"
             role="status"
+            data-saved={status === "saved"}
             data-error={status !== "saved" && status !== "saving"}
           >
             {status === "saved"
@@ -802,13 +820,16 @@ export const ObjectApp = ({
         <div className="od-topbar-actions">
           <button
             type="button"
-            title="Quick Capture（⌘⇧M）"
+            title="Memoを書く（⌘⇧M）"
+            aria-label="Memoを書く"
             onClick={startCapture}
           >
-            ＋ Memo
+            ✎
           </button>
           <button
             type="button"
+            title="Objectを作成"
+            aria-label="Objectを作成"
             onClick={() => {
               setCreateType(
                 types.some((definition) => definition.name === "project")
@@ -818,7 +839,7 @@ export const ObjectApp = ({
               setCreating(true);
             }}
           >
-            ＋ Object
+            ＋
           </button>
         </div>
       </header>
@@ -1022,12 +1043,67 @@ export const ObjectApp = ({
           </form>
         </div>
       ) : null}
-      <div className="od-shell">
-        <nav className="od-nav" aria-label="ページ">
+      {settingsOpen ? (
+        <div
+          className="od-dialog-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setSettingsOpen(false);
+          }}
+        >
+          <div
+            className="od-create-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="od-settings-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setSettingsOpen(false);
+            }}
+          >
+            <h2 id="od-settings-title">設定</h2>
+            <dl className="od-settings">
+              <dt>保存先</dt>
+              <dd>{location}</dd>
+              <dt>データ</dt>
+              <dd>
+                {downloads ? (
+                  <>
+                    <a href="/api/next/backup" download>
+                      バックアップを保存
+                    </a>
+                    <a href="/api/next/export/markdown" download>
+                      Markdownで書き出す
+                    </a>
+                  </>
+                ) : (
+                  "メニューの「Contextory」から、バックアップとMarkdownを書き出せる"
+                )}
+              </dd>
+            </dl>
+            <div className="od-dialog-actions">
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setSettingsOpen(false)}
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <div className="od-shell" data-nav={menuOpen ? "open" : "closed"}>
+        {menuOpen ? (
+          <div
+            className="od-nav-backdrop"
+            aria-hidden="true"
+            onClick={() => setMenuOpen(false)}
+          />
+        ) : null}
+        <nav className="od-nav" aria-label="ページ" hidden={!menuOpen}>
           <button
             type="button"
             aria-current={page !== null && isDaily(page) ? "page" : undefined}
-            onClick={() => open(dailyHostId())}
+            onClick={go(() => open(dailyHostId()))}
           >
             Daily
           </button>
@@ -1053,7 +1129,7 @@ export const ObjectApp = ({
               aria-current={
                 typePage?.name === definition.name ? "page" : undefined
               }
-              onClick={() => openType(definition.name)}
+              onClick={go(() => openType(definition.name))}
             >
               #{typeLabel(definition.name)}
             </button>
@@ -1062,31 +1138,17 @@ export const ObjectApp = ({
             type="button"
             className="od-nav-project"
             aria-current={trashList ? "page" : undefined}
-            onClick={openTrash}
+            onClick={go(openTrash)}
           >
             ゴミ箱
           </button>
-          <dl className="od-keys">
-            <dt>@</dt>
-            <dd>参照・新規作成</dd>
-            <dt>#</dt>
-            <dd>BlockをObject化</dd>
-            <dt>Enter</dt>
-            <dd>Titleや空行からObjectの外へ</dd>
-            <dt>⌫</dt>
-            <dd>Title先頭でObjectを解除</dd>
-          </dl>
-          <p className="od-nav-note">{location}</p>
-          {downloads ? (
-            <p className="od-nav-note od-nav-downloads">
-              <a href="/api/next/backup" download>
-                バックアップを保存
-              </a>
-              <a href="/api/next/export/markdown" download>
-                Markdownで書き出す
-              </a>
-            </p>
-          ) : null}
+          <button
+            type="button"
+            className="od-nav-settings"
+            onClick={go(() => setSettingsOpen(true))}
+          >
+            設定
+          </button>
         </nav>
         <main className="od-main">
           {trashList ? (
@@ -1110,9 +1172,6 @@ export const ObjectApp = ({
                     ゴミ箱を空にする
                   </button>
                 </div>
-                <p className="od-page-lead">
-                  戻したObjectは、どの文書にも置かれていない状態で戻る。自動では消えない。
-                </p>
               </header>
               {trashList.length ? (
                 <ul className="od-rows">
@@ -1323,9 +1382,6 @@ export const ObjectApp = ({
                       new Date(`${selectedDate ?? localDate()}T12:00:00`),
                     )}
                   </h1>
-                  <p className="od-page-lead">
-                    自由に書く。@で触れた段落・見出し・リスト項目は、参照先のTimelineに出る。
-                  </p>
                 </header>
               )}
 
@@ -1376,12 +1432,7 @@ export const ObjectApp = ({
               ) : (
                 <section className="od-panel">
                   <header>
-                    <div>
-                      <h2>この日のMemo</h2>
-                      <p>
-                        ほかの文書でこの日に作ったMemo。ここで書いた内容は、置いてある文書にも出る
-                      </p>
-                    </div>
+                    <h2>この日のMemo</h2>
                   </header>
                   {dayMemos.length ? (
                     <div className="od-day-memos">

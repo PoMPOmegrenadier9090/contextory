@@ -125,7 +125,12 @@ describe("ObjectStore", () => {
     });
     store.savePage(DAILY, doc(), 30);
     // 外れたObjectはゴミ箱へ移る。取り消しで戻すと、作成日時とContextが残る。
-    expect(store.trash().map((o) => o.id).sort()).toEqual(["child", "new"]);
+    expect(
+      store
+        .trash()
+        .map((o) => o.id)
+        .sort(),
+    ).toEqual(["child", "new"]);
     store.savePage(DAILY, tree, 40);
     expect(store.trash()).toEqual([]);
     expect(store.getObject("new")).toMatchObject({
