@@ -159,6 +159,8 @@ export type ObjectTimelineEntry =
       readonly mentioned: boolean;
       /** Fieldの値で言及している場合の、Fieldの名前 */
       readonly field?: string;
+      /** 本文の先頭。TimelineのViewで出す。 */
+      readonly excerpt?: string;
       readonly via: readonly string[];
       readonly time: number;
     }

@@ -25,7 +25,7 @@ import {
 } from "@pkm/editor";
 import { useEffect, useState } from "react";
 
-import { dateRange, localDate } from "./object-date.js";
+import { localDate } from "./object-date.js";
 
 export const KIND_LABEL = {
   text: "テキスト",
@@ -41,13 +41,12 @@ const DATE_FILTERS = [
   ["past", "今日より前"],
 ] as const;
 
+/** Timelineでは日付を見出しに出すので、時刻だけにする。 */
 const formatTime = (time: number): string =>
-  new Intl.DateTimeFormat(
-    "ja-JP",
-    time >= dateRange(localDate()).from
-      ? { hour: "2-digit", minute: "2-digit" }
-      : { month: "numeric", day: "numeric" },
-  ).format(time);
+  new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(time);
 
 const refNodes = (ids: readonly string[]): DocNode[] =>
   ids.flatMap((objectId) => [
@@ -1202,22 +1201,21 @@ export const ViewTabs = ({
     if (entry.kind === "unit")
       return (
         <li
-          className="od-row"
+          className="od-card"
           data-type="mention"
           key={`${entry.hostId}-${entry.unitId}`}
         >
-          <span className="od-type">
-            {entry.unitKind === "section" ? "見出し" : "言及"}
-          </span>
           <button type="button" onClick={() => open(entry.hostId)}>
-            <strong>{entry.text}</strong>
-            <small>
-              {[entry.hostTitle, viaNote(entry.via)]
-                .filter(Boolean)
-                .join(" · ")}
-            </small>
+            <span className="od-card-head">
+              <span className="od-type">
+                {entry.unitKind === "section" ? "見出し" : "言及"}
+              </span>
+              <strong>{entry.hostTitle}</strong>
+              <time>{formatTime(entry.time)}</time>
+            </span>
+            <span className="od-excerpt">{entry.text}</span>
+            {entry.via.length ? <small>{viaNote(entry.via)}</small> : null}
           </button>
-          <time>{formatTime(entry.time)}</time>
         </li>
       );
     const { object } = entry;
@@ -1225,27 +1223,55 @@ export const ViewTabs = ({
       ? [entry.field ? `${entry.field}で言及` : "言及", viaNote(entry.via)]
           .filter(Boolean)
           .join(" · ")
-      : viaNote(entry.via) || (anchorId ? "直接" : "");
+      : viaNote(entry.via);
+    const checkbox = typeOf(object.type)?.checkbox;
     return (
       <li
-        className="od-row"
+        className="od-card"
         data-type={object.type}
         data-color={typeOf(object.type)?.color ?? undefined}
+        data-done={checkbox && object.done}
         key={object.id}
       >
-        <span className="od-type">{typeLabel(object.type)}</span>
         <button type="button" onClick={() => open(object.id)}>
-          <strong>{object.title}</strong>
+          <span className="od-card-head">
+            <span className="od-type">{typeLabel(object.type)}</span>
+            <strong>{object.title}</strong>
+            {checkbox && object.done ? (
+              <span className="od-row-status">完了</span>
+            ) : null}
+            <time>{formatTime(entry.time)}</time>
+          </span>
+          {entry.excerpt ? (
+            <span className="od-excerpt">{entry.excerpt}</span>
+          ) : null}
           {note ? <small>{note}</small> : null}
         </button>
-        {typeOf(object.type)?.checkbox ? (
-          <span className="od-row-status" data-done={object.done}>
-            {object.done ? "完了" : "未完了"}
-          </span>
-        ) : null}
-        <time>{formatTime(entry.time)}</time>
       </li>
     );
+  };
+  /** 日付の見出しを挟んで並べる。 */
+  const dayLabel = (time: number): string =>
+    new Intl.DateTimeFormat("ja-JP", {
+      month: "long",
+      day: "numeric",
+      weekday: "short",
+    }).format(new Date(time));
+  const timeline = (entries: readonly ObjectTimelineEntry[]) => {
+    const items: React.JSX.Element[] = [];
+    let last = "";
+    for (const entry of entries) {
+      const day = dayLabel(entry.time);
+      if (day !== last)
+        items.push(
+          <li key={`day-${day}`} className="od-day">
+            {day}
+          </li>,
+        );
+      last = day;
+      items.push(entryRow(entry));
+    }
+    return items;
   };
 
   return (
@@ -1260,7 +1286,7 @@ export const ViewTabs = ({
       {table ? (
         tableView
       ) : data?.entries.length ? (
-        <ul className="od-rows">{data.entries.map(entryRow)}</ul>
+        <ul className="od-timeline">{timeline(data.entries)}</ul>
       ) : (
         <p className="od-empty">まだありません。</p>
       )}

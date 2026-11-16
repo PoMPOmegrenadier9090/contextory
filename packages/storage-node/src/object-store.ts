@@ -317,6 +317,29 @@ export class ObjectStore {
     };
   }
 
+  /** 本文の先頭の文字。埋め込んだObjectはTitleにする。 */
+  private excerpt(row: ObjectRow, limit = 160): string {
+    const parts: string[] = [];
+    const walk = (list: readonly DocNode[]): void => {
+      for (const node of list) {
+        if (parts.join(" ").length > limit) return;
+        if (node.type === "objectEmbed") {
+          const embedded = this.row(String(node.attrs?.objectId));
+          if (embedded) parts.push(this.text(nodes(embedded.title)));
+        } else if (
+          node.content?.some(
+            (child) => child.type === "text" || child.type === "objectRef",
+          )
+        )
+          parts.push(this.text(node.content));
+        else walk(node.content ?? []);
+      }
+    };
+    walk(nodes(row.body));
+    const text = parts.filter(Boolean).join(" ");
+    return text.length > limit ? `${text.slice(0, limit)}…` : text;
+  }
+
   private hostBody(hostId: string): readonly DocNode[] {
     const row = this.row(hostId);
     if (row) return nodes(row.body);
@@ -1018,6 +1041,14 @@ export class ObjectStore {
             entry.kind === "object"
               ? matches(item(this.requireRow(entry.object.id)))
               : !narrowed,
+          )
+          .map((entry) =>
+            entry.kind === "object"
+              ? {
+                  ...entry,
+                  excerpt: this.excerpt(this.requireRow(entry.object.id)),
+                }
+              : entry,
           )
           .sort((a, b) => b.time - a.time),
         objects: {},

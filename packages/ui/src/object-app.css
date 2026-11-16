@@ -596,6 +596,82 @@ html {
   white-space: nowrap;
 }
 
+/* Timeline。日付の見出しと、本文の先頭を読めるカード。 */
+.od-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.od-day {
+  margin-top: 10px;
+  color: var(--od-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.od-day:first-child {
+  margin-top: 0;
+}
+
+.od-demo .od-card > button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line);
+  border-left: 3px solid var(--od-type);
+  border-radius: 8px;
+}
+
+.od-demo .od-card > button:hover {
+  border-color: var(--od-line-strong);
+  border-left-color: var(--od-type);
+}
+
+.od-card-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.od-card-head strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.od-card[data-done="true"] .od-card-head strong {
+  color: var(--od-muted);
+  text-decoration: line-through;
+}
+
+.od-card time,
+.od-card small {
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
+.od-excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--od-ink);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .od-conflict {
   display: grid;
   gap: 8px;

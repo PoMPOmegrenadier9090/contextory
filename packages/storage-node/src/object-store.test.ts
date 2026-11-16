@@ -512,10 +512,16 @@ describe("ObjectStore", () => {
         .queryView(views[0]!.id, null, "2026-11-12")
         .rows.map((row) => row.object.id),
     ).toEqual(["other", "project"]);
-    // ObjectのページのTimelineは、これまでのTimelineと同じ内容になる。
+    // ObjectのページのTimelineは、これまでのTimelineに本文の先頭を足したものになる。
+    const entries = store.queryView(
+      views[1]!.id,
+      "project",
+      "2026-11-12",
+    ).entries;
+    expect(entries).toMatchObject(store.timeline("project"));
     expect(
-      store.queryView(views[1]!.id, "project", "2026-11-12").entries,
-    ).toEqual(store.timeline("project"));
+      entries.find((e) => e.kind === "object" && e.object.id === "memo"),
+    ).toMatchObject({ excerpt: "project" });
     expect(() => store.queryView(views[1]!.id, null, "2026-11-12")).toThrow(
       ObjectStoreError,
     );

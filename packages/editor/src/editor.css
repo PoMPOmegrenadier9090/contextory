@@ -392,17 +392,21 @@
 
 .pe-context {
   max-width: 160px;
-  padding: 1px 8px;
+  padding: 0 4px;
   overflow: hidden;
-  color: var(--pe-type);
+  color: var(--pe-muted);
   font: inherit;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--pe-surface);
-  border: 1px solid var(--pe-line);
-  border-radius: 999px;
+  background: none;
+  border: 0;
   cursor: pointer;
+}
+
+/* 置いた文書と違うContextだけを、Titleの後ろに小さな文字で添える。 */
+.pe-context::before {
+  content: "· ";
 }
 
 /* @ / # menu */
