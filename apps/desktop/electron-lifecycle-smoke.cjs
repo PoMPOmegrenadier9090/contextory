@@ -332,8 +332,21 @@ if (typeof electron === "string") {
 
         const listStart = await point(0, true);
         const listEnd = await point(1, true);
-        mouse("mouseDown", { x: listStart.x + 26, y: listStart.y });
-        mouse("mouseUp", { x: listStart.x + 26, y: listStart.y });
+        const listTextX = Number(
+          await script(
+            'Math.round(document.querySelector(".od-document li p").getBoundingClientRect().left + 6)',
+          ),
+        );
+        assert.equal(
+          await script(`(() => {
+          const row = document.querySelector(".od-document li p");
+          const grip = row.querySelector(".pe-grip").getBoundingClientRect();
+          return grip.right < row.getBoundingClientRect().left;
+        })()`),
+          true,
+        );
+        mouse("mouseDown", { x: listTextX, y: listStart.y });
+        mouse("mouseUp", { x: listTextX, y: listStart.y });
         await pause();
         assert.equal(
           await script("getSelection().anchorNode?.textContent"),

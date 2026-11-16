@@ -46,7 +46,7 @@
 .pe-editor .tiptap ul,
 .pe-editor .tiptap ol {
   margin: 0;
-  padding-left: 22px;
+  padding-inline-start: var(--pe-list-indent);
 }
 
 /* Fieldの窓の候補一覧は、本文の箇条書きではない。 */
@@ -135,9 +135,7 @@
 
 /* object block: 行頭に種別のアイコン、1行目はTitle、開いた時だけFieldと本文を出す */
 .pe-object {
-  --pe-lead-width: 46px;
-  --pe-grip-size: 24px;
-  --pe-row-height: 31px;
+  --pe-lead-width: 43px;
   display: grid;
   grid-template-columns: var(--pe-lead-width) minmax(0, 1fr) auto;
   column-gap: 6px;
@@ -164,8 +162,11 @@
 }
 
 .pe-grip {
-  flex: 0 0 var(--pe-grip-size);
-  align-self: stretch;
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 100%;
+  width: var(--pe-grip-size);
+  height: var(--pe-row-height);
   padding: 0;
   border: 0;
   border-radius: 6px;
@@ -197,11 +198,9 @@
   accent-color: var(--pe-type);
 }
 
-/* 開閉は左の余白に浮かせ、hover・キーボード操作の時だけ見せる。 */
+/* 開閉は種別アイコンの手前に置く。 */
 .pe-toggle {
-  position: absolute;
-  top: calc((var(--pe-row-height) - 22px) / 2);
-  left: -18px;
+  flex: 0 0 22px;
   display: grid;
   place-items: center;
   width: 22px;
@@ -323,9 +322,6 @@
 
 @media (pointer: coarse) {
   .pe-object {
-    --pe-lead-width: 65px;
-    --pe-grip-size: 44px;
-    --pe-row-height: 44px;
     grid-template-columns: var(--pe-lead-width) minmax(0, 1fr) fit-content(45%);
   }
 
@@ -343,7 +339,7 @@
 }
 
 .pe-editor .tiptap li > .node-objectBlock:first-child {
-  margin-left: -26px;
+  margin-inline-start: calc(-1 * var(--pe-object-list-outdent));
 }
 
 .pe-object [data-object-title] {
@@ -561,15 +557,22 @@
 }
 
 .pe-edit-area {
+  --pe-selection-gutter-width: 14px;
+  --pe-grip-size: 24px;
+  --pe-row-height: 31px;
+  --pe-list-indent: 22px;
+  --pe-object-list-outdent: 26px;
   position: relative;
-  padding-inline-start: 24px;
+  padding-inline-start: calc(
+    var(--pe-selection-gutter-width) + var(--pe-grip-size)
+  );
 }
 
 .pe-select-gutter {
   position: absolute;
   z-index: 1;
   inset: 0 auto 0 0;
-  width: 14px;
+  width: var(--pe-selection-gutter-width);
   touch-action: none;
   cursor: crosshair;
 }
@@ -595,32 +598,43 @@
   background: Highlight;
 }
 
-.pe-editor .tiptap .pe-plain-block {
+.pe-plain-block {
   position: relative;
-  padding-inline-start: 27px;
 }
 
 .pe-plain-grip {
-  position: absolute;
-  inset: 0 auto auto 0;
-  width: 24px;
-  height: 31px;
+  height: min(100%, var(--pe-row-height));
 }
 
-.pe-plain-block:hover > .pe-grip,
+/* リストの先頭行では、箇条書き記号の左に揃える。 */
+.pe-editor li > .pe-plain-block:first-child .pe-grip {
+  inset-inline-end: calc(100% + var(--pe-list-indent));
+}
+
+.pe-editor
+  li
+  > .node-objectBlock:first-child
+  > .pe-object
+  > .pe-object-lead
+  > .pe-grip {
+  inset-inline-end: calc(
+    100% + var(--pe-list-indent) - var(--pe-object-list-outdent)
+  );
+}
+
+.pe-plain-block:hover .pe-grip,
 .pe-block-selected .pe-grip {
   opacity: 1;
 }
 
 @media (pointer: coarse) {
-  .pe-editor .tiptap .pe-plain-block {
-    padding-inline-start: 47px;
-    min-height: 44px;
+  .pe-edit-area {
+    --pe-grip-size: 44px;
+    --pe-row-height: 44px;
   }
 
-  .pe-plain-grip {
-    width: 44px;
-    height: 44px;
+  .pe-editor .tiptap .pe-plain-block {
+    min-height: var(--pe-row-height);
   }
 }
 
