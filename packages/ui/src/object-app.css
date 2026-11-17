@@ -164,6 +164,11 @@ html {
 
 [data-desktop-platform="mac"] .od-topbar {
   padding-inline-start: 88px;
+  app-region: drag;
+}
+
+[data-desktop-platform="mac"] .od-topbar > div {
+  app-region: no-drag;
 }
 
 .od-topbar > div {
