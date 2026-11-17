@@ -873,7 +873,7 @@ export const ObjectApp = ({
           >
             ☰
           </button>
-          <ObjectSearch client={client} open={open} />
+          <ObjectSearch client={client} open={open} openType={openType} />
           <span
             className="od-save-status"
             role="status"

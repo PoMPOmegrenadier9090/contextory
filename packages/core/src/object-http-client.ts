@@ -2,6 +2,7 @@ import type {
   ObjectClient,
   ObjectOverview,
   ViewResult,
+  WorkspaceSearchResult,
 } from "./object-client.js";
 import type {
   ObjectPage,
@@ -67,6 +68,11 @@ export const createHttpObjectClient = ({
         `/pages/${encode(hostId)}`,
         { doc, baseRevision },
         keepalive,
+      ),
+    searchWorkspace: (query) =>
+      request<readonly WorkspaceSearchResult[]>(
+        "GET",
+        `/search?query=${encode(query)}`,
       ),
     searchObjects: (query, exclude = null, limit) =>
       request<readonly ObjectSummary[]>(

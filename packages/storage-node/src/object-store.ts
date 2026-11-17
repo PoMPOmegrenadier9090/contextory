@@ -21,6 +21,8 @@ import {
   splitDocument,
   timeFromId,
   TYPE_COLORS,
+  WORKSPACE_SEARCH_LIMIT,
+  type WorkspaceSearchResult,
   type DayMemo,
   type DocNode,
   type FieldDefinition,
@@ -958,6 +960,104 @@ export class ObjectStore {
         Number.isSafeInteger(limit) && limit > 0 ? Math.min(100, limit) : 6,
       ) as ObjectRow[];
     return rows.map((row) => this.summary(row));
+  }
+
+  searchWorkspace(query: string): WorkspaceSearchResult[] {
+    const normalize = (text: string): string =>
+      text.normalize("NFKC").toLowerCase();
+    const term = normalize(query.trim()).slice(0, 500);
+    if (!term) return [];
+    const words = term.split(/\s+/);
+    const matches = (text: string): boolean =>
+      words.every((word) => text.includes(word));
+    const titles: WorkspaceSearchResult[] = [];
+    const bodies: WorkspaceSearchResult[] = [];
+    const limit = WORKSPACE_SEARCH_LIMIT;
+    for (const { name } of this.types()) {
+      if (
+        words.every((word) =>
+          normalize(name).includes(
+            word === "#" ? word : word.replace(/^#/, ""),
+          ),
+        )
+      )
+        titles.push({ kind: "type", id: name });
+      if (titles.length === limit) return titles;
+    }
+
+    const bodyText = (content: readonly DocNode[]): string =>
+      content.some((node) => node.type === "text" || node.type === "objectRef")
+        ? this.text(
+            content.map((node) =>
+              node.type === "hardBreak" ? { type: "text", text: " " } : node,
+            ),
+          )
+        : content
+            .map((node) => bodyText(node.content ?? []))
+            .filter(Boolean)
+            .join(" ");
+
+    // shortcut: 本文は保存済みの文書を直接走査する。実データで遅くなったら索引を追加する。
+    const rows = this.database
+      .prepare(
+        `
+      SELECT id, type, title_text, body, updated_at
+      FROM objects WHERE deleted_at IS NULL
+      UNION ALL
+      SELECT id, NULL AS type, '' AS title_text, body, updated_at FROM documents
+      ORDER BY updated_at DESC, id
+    `,
+      )
+      .iterate() as Iterable<{
+      id: string;
+      type: ObjectType | null;
+      title_text: string;
+      body: string;
+    }>;
+    for (const row of rows) {
+      const hit =
+        row.type === null
+          ? {
+              kind: "daily" as const,
+              id: row.id,
+              title:
+                row.id === DAILY_UNDATED_ID
+                  ? "日付なしのDaily"
+                  : `${row.id.slice(6)}のDaily`,
+            }
+          : {
+              kind: "object" as const,
+              id: row.id,
+              title: row.title_text || "無題",
+              type: row.type,
+            };
+      const title = normalize(hit.title);
+      if (matches(title)) {
+        titles.push(hit);
+        if (titles.length === limit) break;
+        continue;
+      }
+      if (bodies.length >= limit - titles.length) continue;
+      const original = bodyText(nodes(row.body));
+      const normalized = normalize(original);
+      if (!matches(`${title} ${normalized}`)) continue;
+      const match = Math.min(
+        ...words
+          .map((word) => normalized.indexOf(word))
+          .filter((index) => index >= 0),
+      );
+      const text =
+        normalized.length === original.length
+          ? original
+          : original.normalize("NFKC");
+      const start = Math.max(0, match - 28);
+      const end = start + 140;
+      bodies.push({
+        ...hit,
+        excerpt: `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`,
+      });
+    }
+    return [...titles, ...bodies].slice(0, limit);
   }
 
   /**

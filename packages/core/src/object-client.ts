@@ -42,6 +42,18 @@ export interface ViewResult {
   readonly objects: Readonly<Record<string, ObjectSummary>>;
 }
 
+export const WORKSPACE_SEARCH_LIMIT = 50;
+
+export type WorkspaceSearchResult =
+  | { readonly kind: "type"; readonly id: string }
+  | {
+      readonly kind: "object" | "daily";
+      readonly id: string;
+      readonly title: string;
+      readonly type?: ObjectType;
+      readonly excerpt?: string;
+    };
+
 export interface ObjectPatch {
   readonly title?: string;
   /** 種別を変える。新しい種別に無いFieldの値は消える。 */
@@ -71,6 +83,7 @@ export interface ObjectClient {
     baseRevision: string | null,
     keepalive?: boolean,
   ): Promise<ObjectPage>;
+  searchWorkspace(query: string): Promise<readonly WorkspaceSearchResult[]>;
   searchObjects(
     query: string,
     exclude?: string | null,

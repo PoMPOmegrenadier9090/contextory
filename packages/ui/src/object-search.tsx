@@ -1,35 +1,47 @@
-import type { ObjectClient, ObjectSummary } from "@pkm/core";
+import {
+  WORKSPACE_SEARCH_LIMIT,
+  type ObjectClient,
+  type WorkspaceSearchResult,
+} from "@pkm/core";
 import { typeLabel } from "@pkm/editor";
-import { useEffect, useRef, useState } from "react";
-
-const LIMIT = 50;
+import { useEffect, useId, useRef, useState } from "react";
 
 export const ObjectSearch = ({
   client,
   open,
+  openType,
 }: {
   readonly client: ObjectClient;
   readonly open: (id: string) => void;
+  readonly openType: (name: string) => void;
 }): React.JSX.Element => {
   const dialog = useRef<HTMLDialogElement>(null);
   const [visible, setVisible] = useState(false);
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(0);
+  const listId = useId();
   const [result, setResult] = useState<{
     readonly query: string;
-    readonly objects: readonly ObjectSummary[] | null;
+    readonly hits: readonly WorkspaceSearchResult[] | null;
   } | null>(null);
   const term = query.trim();
   const current = result?.query === term ? result : null;
+  const hits = current?.hits;
+  const activeId = hits?.[selected] ? `${listId}-${selected}` : undefined;
+  useEffect(() => {
+    if (activeId)
+      document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
+  }, [activeId]);
   useEffect(() => {
     if (!visible || !term) return;
     let live = true;
     const timer = window.setTimeout(() => {
-      void client.searchObjects(term, null, LIMIT).then(
-        (objects) => {
-          if (live) setResult({ query: term, objects });
+      void client.searchWorkspace(term).then(
+        (hits) => {
+          if (live) setResult({ query: term, hits });
         },
         () => {
-          if (live) setResult({ query: term, objects: null });
+          if (live) setResult({ query: term, hits: null });
         },
       );
     }, 120);
@@ -38,9 +50,10 @@ export const ObjectSearch = ({
       window.clearTimeout(timer);
     };
   }, [client, term, visible]);
-  const pick = (id: string): void => {
+  const pick = (hit: WorkspaceSearchResult): void => {
     dialog.current?.close();
-    open(id);
+    if (hit.kind === "type") openType(hit.id);
+    else open(hit.id);
   };
   return (
     <>
@@ -48,6 +61,9 @@ export const ObjectSearch = ({
         type="button"
         className="od-search-trigger"
         onClick={() => {
+          setQuery("");
+          setSelected(0);
+          setResult(null);
           setVisible(true);
           dialog.current?.showModal();
           dialog.current?.querySelector("input")?.focus();
@@ -58,11 +74,9 @@ export const ObjectSearch = ({
       <dialog
         ref={dialog}
         className="od-search-dialog"
-        aria-label="Objectを検索"
-        onClose={() => {
-          setVisible(false);
-          setQuery("");
-          setResult(null);
+        aria-label="ワークスペースを検索"
+        onClose={(event) => {
+          if (!event.currentTarget.open) setVisible(false);
         }}
       >
         <header className="od-search-bar">
@@ -70,24 +84,46 @@ export const ObjectSearch = ({
             className="od-search-query"
             onSubmit={(event) => {
               event.preventDefault();
-              if (current?.objects?.[0]) pick(current.objects[0].id);
+              if (hits?.[selected]) pick(hits[selected]);
             }}
           >
             <input
               type="search"
-              aria-label="Objectのタイトル"
-              placeholder="Objectのタイトルを検索"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={Boolean(hits?.length)}
+              aria-controls={hits?.length ? listId : undefined}
+              aria-activedescendant={activeId}
+              aria-label="ワークスペースを検索"
+              placeholder="タイトル・種別・本文を検索"
               autoFocus
               value={query}
               onChange={(event) => {
-                if (event.currentTarget.value.trim() !== term) setResult(null);
+                if (event.currentTarget.value.trim() !== term) {
+                  setResult(null);
+                  setSelected(0);
+                }
                 setQuery(event.currentTarget.value);
               }}
               onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                if (
+                  event.nativeEvent.isComposing ||
+                  event.nativeEvent.keyCode === 229
+                )
                   return;
-                event.preventDefault();
-                if (current?.objects?.[0]) pick(current.objects[0].id);
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (hits?.[selected]) pick(hits[selected]);
+                } else if (
+                  hits?.length &&
+                  (event.key === "ArrowDown" || event.key === "ArrowUp")
+                ) {
+                  event.preventDefault();
+                  const step = event.key === "ArrowDown" ? 1 : -1;
+                  setSelected(
+                    (index) => (index + step + hits.length) % hits.length,
+                  );
+                }
               }}
             />
           </form>
@@ -106,21 +142,45 @@ export const ObjectSearch = ({
           <p className="od-search-status" role="status">
             {!current
               ? "検索中…"
-              : current.objects === null
+              : current.hits === null
                 ? "検索できませんでした"
-                : current.objects.length === 0
-                  ? "該当するObjectはありません"
-                  : `${current.objects.length}件${current.objects.length === LIMIT ? "まで表示" : ""}`}
+                : current.hits.length === 0
+                  ? "一致する結果はありません"
+                  : `${current.hits.length}件${current.hits.length === WORKSPACE_SEARCH_LIMIT ? "まで表示" : ""}`}
           </p>
         ) : null}
-        {current?.objects?.length ? (
-          <ul className="od-search-results">
-            {current.objects.map((object) => (
-              <li key={object.id}>
-                <button type="button" onClick={() => pick(object.id)}>
-                  <span>{object.title}</span>
-                  <small data-type={object.type}>
-                    {typeLabel(object.type)}
+        {hits?.length ? (
+          <ul
+            className="od-search-results"
+            role="listbox"
+            aria-label="検索結果"
+            id={listId}
+          >
+            {hits.map((hit, index) => (
+              <li role="presentation" key={`${hit.kind}:${hit.id}`}>
+                <button
+                  type="button"
+                  role="option"
+                  tabIndex={-1}
+                  id={`${listId}-${index}`}
+                  aria-selected={index === selected}
+                  onMouseMove={() => setSelected(index)}
+                  onClick={() => pick(hit)}
+                >
+                  <span>
+                    {hit.kind === "type" ? `#${typeLabel(hit.id)}` : hit.title}
+                    {hit.kind !== "type" && hit.excerpt ? (
+                      <span className="od-search-excerpt">{hit.excerpt}</span>
+                    ) : null}
+                  </span>
+                  <small
+                    data-type={hit.kind === "object" ? hit.type : undefined}
+                  >
+                    {hit.kind === "type"
+                      ? "種別"
+                      : hit.kind === "daily"
+                        ? "Daily"
+                        : typeLabel(hit.type ?? "")}
                   </small>
                 </button>
               </li>

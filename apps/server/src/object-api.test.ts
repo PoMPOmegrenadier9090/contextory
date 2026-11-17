@@ -28,6 +28,14 @@ afterEach(async () => {
 });
 
 describe("object API", () => {
+  it("returns workspace search results from the API", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
+    directories.push(parent);
+    const app = await open(parent);
+    const result = await app.inject({ url: "/api/next/search?query=%23task" });
+    expect(result.json<unknown>()).toEqual([{ kind: "type", id: "task" }]);
+  });
+
   it("persists pages across restarts and serves the timeline from the index", async () => {
     const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
     directories.push(parent);

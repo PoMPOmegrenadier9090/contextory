@@ -183,6 +183,16 @@ if (typeof electron === "string") {
           Date.now(),
         );
         store.savePage(
+          "view-smoke-row",
+          {
+            type: "doc",
+            content: [
+              { type: "paragraph", content: text("本文だけの照合語。") },
+            ],
+          },
+          Date.now(),
+        );
+        store.savePage(
           key,
           {
             type: "doc",
@@ -418,7 +428,9 @@ if (typeof electron === "string") {
           const until = Date.now() + 4_000;
           while (!(await script(condition))) {
             if (Date.now() >= until)
-              throw new Error(`Embedded View did not update: ${condition}`);
+              throw new Error(
+                `The renderer did not meet this condition: ${condition}`,
+              );
             await pause();
           }
         };
@@ -456,7 +468,26 @@ if (typeof electron === "string") {
           ),
           true,
         );
-        await script('document.querySelector(".od-search-dialog").close()');
+        await webContents.insertText("本文だけの照合語");
+        await waitFor(
+          'document.querySelector(".od-search-excerpt")?.textContent.includes("本文だけの照合語")',
+        );
+        key("Return");
+        await waitFor(
+          'document.querySelector(".od-page-title")?.value === "Edited View row"',
+        );
+        await script('document.querySelector(".od-search-trigger").click()');
+        await waitFor(
+          'document.activeElement.matches(".od-search-dialog input") && document.activeElement.value === ""',
+        );
+        await webContents.insertText("#Task");
+        await waitFor(
+          'document.querySelector(".od-search-results [aria-selected=true]")?.textContent.includes("種別")',
+        );
+        key("Return");
+        await waitFor(
+          'document.querySelector("h1")?.textContent.includes("#Task")',
+        );
       } else if (phase === "remote") {
         const url = process.argv[4];
         /** @type {unknown} */

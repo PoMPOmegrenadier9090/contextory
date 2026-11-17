@@ -239,7 +239,7 @@ if (smoke) {
         dailyButton: [...document.querySelectorAll('button')]
           .some((button) => button.textContent === 'Daily'),
         methods: [
-          'loadPage', 'savePage', 'searchObjects',
+          'loadPage', 'savePage', 'searchObjects', 'searchWorkspace',
           'createObject', 'patchObject', 'queryView',
           'types', 'updateType', 'overview', 'trashObject',
           'restoreObject', 'purgeObject', 'trash', 'emptyTrash', 'deleteType',

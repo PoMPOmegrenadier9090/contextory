@@ -2,6 +2,7 @@ export const DESKTOP_IPC_CHANNELS = {
   objectLoadPage: "pkm:objects:page:load",
   objectSavePage: "pkm:objects:page:save",
   objectSavePageSync: "pkm:objects:page:save-sync",
+  workspaceSearch: "pkm:workspace:search",
   objectSearch: "pkm:objects:search",
   objectCreate: "pkm:objects:create",
   objectPatch: "pkm:objects:patch",

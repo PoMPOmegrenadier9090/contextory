@@ -39,7 +39,9 @@ export type {
   ObjectTimelineEntry,
   ObjectType,
 } from "./object-model.js";
+export { WORKSPACE_SEARCH_LIMIT } from "./object-client.js";
 export type {
+  WorkspaceSearchResult,
   ObjectClient,
   DayMemo,
   ObjectOverview,

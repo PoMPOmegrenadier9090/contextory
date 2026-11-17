@@ -1585,7 +1585,7 @@ html {
 
 .od-search-close:hover,
 .od-search-results button:hover,
-.od-search-dialog:has(input:focus) .od-search-results li:first-child button {
+.od-search-results button[aria-selected="true"] {
   background: var(--od-subtle);
 }
 
@@ -1631,6 +1631,14 @@ html {
 .od-search-results button > span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.od-search-excerpt {
+  display: block;
+  margin-block-start: 3px;
+  color: var(--od-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .od-search-results small {

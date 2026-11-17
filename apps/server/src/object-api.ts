@@ -53,6 +53,11 @@ export const registerObjectRoutes = (
     );
   });
 
+  app.get("/api/next/search", (request) => {
+    const { query } = requireRecord(request.query);
+    return store.searchWorkspace(typeof query === "string" ? query : "");
+  });
+
   app.get("/api/next/objects", (request) => {
     const query = requireRecord(request.query);
     return store.search(

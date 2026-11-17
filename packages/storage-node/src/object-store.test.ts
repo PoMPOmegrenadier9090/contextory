@@ -282,6 +282,55 @@ describe("ObjectStore", () => {
     expect(store.overview(0, 50).recent.map((o) => o.id)).not.toContain("x");
   });
 
+  it("searches type names, titles and full Object and Daily text", () => {
+    const token = "照合１００％";
+    const body = paragraph(
+      "nested",
+      text("続き".repeat(180)),
+      text(token),
+      text(" 値を保存"),
+    );
+    store.savePage(
+      "daily:undated",
+      doc(
+        paragraph("daily-text", text("Dailyだけの照合100%")),
+        block("search-object", "会議", "検索対象", {
+          type: "bulletList",
+          content: [{ type: "listItem", content: [body] }],
+        }),
+      ),
+      60,
+    );
+    expect(store.searchWorkspace("#会議")).toEqual([
+      { kind: "type", id: "会議" },
+    ]);
+    expect(store.searchWorkspace("検索対象")).toMatchObject([
+      { kind: "object", id: "search-object", title: "検索対象" },
+    ]);
+    expect(store.searchWorkspace("検索対象 値を保存")[0]).toMatchObject({
+      id: "search-object",
+    });
+    const hits = store.searchWorkspace("照合100%");
+    expect(hits).toHaveLength(2);
+    const object = hits.find(
+      (hit) => hit.kind === "object" && hit.id === "search-object",
+    );
+    expect(object?.kind === "object" ? object.excerpt : undefined).toContain(
+      token,
+    );
+    expect(hits).toContainEqual(
+      expect.objectContaining({
+        kind: "daily",
+        id: "daily:undated",
+        title: "日付なしのDaily",
+      }),
+    );
+    store.trashObject("search-object", 61);
+    expect(store.searchWorkspace("照合100%").map((hit) => hit.id)).toEqual([
+      "daily:undated",
+    ]);
+  });
+
   it("keeps user-defined types and lists them", () => {
     expect(normalizeObjectType(" Task ")).toBe("task");
     expect(normalizeObjectType("会議")).toBe("会議");

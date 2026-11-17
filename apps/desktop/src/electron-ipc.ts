@@ -61,6 +61,11 @@ export const registerDesktopIpc = ({
         );
     },
   );
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.workspaceSearch, (_event, query) => {
+    if (typeof query !== "string")
+      throw new TypeError("query must be a string");
+    return client().searchWorkspace(query);
+  });
   ipcMain.handle(
     DESKTOP_IPC_CHANNELS.objectSearch,
     (_event, query: unknown, exclude: unknown, limit: unknown) => {

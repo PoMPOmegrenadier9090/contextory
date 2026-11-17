@@ -32,6 +32,11 @@ const api: DesktopApi = {
       ? Promise.resolve(result.page)
       : Promise.reject(new Error(result.error));
   },
+  searchWorkspace: (query) =>
+    invoke<Awaited<ReturnType<DesktopApi["searchWorkspace"]>>>(
+      DESKTOP_IPC_CHANNELS.workspaceSearch,
+      query,
+    ),
   searchObjects: (query, exclude = null, limit) =>
     invoke<readonly ObjectSummary[]>(
       DESKTOP_IPC_CHANNELS.objectSearch,
