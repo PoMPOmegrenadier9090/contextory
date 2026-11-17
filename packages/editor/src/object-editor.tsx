@@ -31,6 +31,7 @@ import {
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Suggestion, {
+  exitSuggestion,
   type SuggestionKeyDownProps,
   type SuggestionProps,
 } from "@tiptap/suggestion";
@@ -876,6 +877,7 @@ interface MenuState {
   readonly x: number;
   readonly y: number;
   readonly pick: (item: MenuItem) => void;
+  readonly dismiss: () => void;
 }
 
 /** Suggestion pluginとReactのメニューをつなぐ、エディタごとの窓口。 */
@@ -1174,7 +1176,9 @@ const createMenus = (
     name: "objectMenus",
     priority: 1000, // メニュー表示中のEnterを、ObjectBlockのEnterより先に受ける。
     addProseMirrorPlugins() {
-      const render = (title: string) => () => {
+      const atMenu = new PluginKey("atMenu");
+      const hashMenu = new PluginKey("hashMenu");
+      const render = (title: string, key: PluginKey) => () => {
         const show = (props: SuggestionProps<MenuItem>): void => {
           const rect = props.clientRect?.();
           bridge.show({
@@ -1183,6 +1187,7 @@ const createMenus = (
             x: rect?.left ?? 0,
             y: (rect?.bottom ?? 0) + 6,
             pick: (item) => props.command(item),
+            dismiss: () => exitSuggestion(props.editor.view, key),
           });
         };
         return {
@@ -1208,18 +1213,18 @@ const createMenus = (
         Suggestion<MenuItem, MenuItem>({
           ...common,
           char: "@",
-          pluginKey: new PluginKey("atMenu"),
+          pluginKey: atMenu,
           items: ({ query }) => atItems(host.current, query),
-          render: render("参照・作成"),
+          render: render("参照・作成", atMenu),
         }),
         Suggestion<MenuItem, MenuItem>({
           ...common,
           char: "#",
           // Tanaと同じく、文に続けて打った#でも作れるようにする。
           allowedPrefixes: null,
-          pluginKey: new PluginKey("hashMenu"),
+          pluginKey: hashMenu,
           items: ({ query }) => hashItems(host.current, query),
-          render: render("このBlockをObjectにする"),
+          render: render("このBlockをObjectにする", hashMenu),
         }),
       ];
     },
@@ -1690,6 +1695,22 @@ export const ObjectEditor = ({
   });
 
   editorRef.current = editor;
+
+  const suggestionOpen = Boolean(menu?.items.length);
+  useEffect(() => {
+    if (!suggestionOpen) return;
+    const dismiss = (event: KeyboardEvent): void => {
+      const current = shown.current.menu;
+      if (event.key !== "Escape" || event.isComposing || !current?.items.length)
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      current.dismiss();
+    };
+    // 本文からフォーカスが外れると、エディタ自身のキー処理には届かない。
+    document.addEventListener("keydown", dismiss, true);
+    return () => document.removeEventListener("keydown", dismiss, true);
+  }, [suggestionOpen]);
 
   // 画面外でメニューが残らないよう、エディタを離れたら閉じる。
   useEffect(() => () => setMenu(null), []);
