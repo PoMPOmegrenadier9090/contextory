@@ -738,9 +738,8 @@ html {
     padding: 16px 16px 120px;
   }
 
-  /* 開閉の矢印は本文の左の余白に出るので、その分をあける。 */
   .od-demo .od-document .pe-editor {
-    padding: 0 12px 0 30px;
+    padding-inline-end: 12px;
   }
 
   .od-row {
@@ -758,7 +757,7 @@ html {
 }
 
 .od-document .pe-editor {
-  padding: 0 14px;
+  padding-inline-end: 14px;
 }
 
 .od-status {
