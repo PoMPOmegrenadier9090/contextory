@@ -521,6 +521,22 @@ if (typeof electron === "string") {
           true,
         );
         assert.equal(await caret(), beforeEscape);
+        await script(
+          "document.querySelector('button[aria-label=\"Memoを書く\"]').click()",
+        );
+        await waitFor('!!document.querySelector(".od-capture-body .tiptap p")');
+        assert.equal(
+          await script(`(() => {
+            const title = document.querySelector(".od-capture-title");
+            const body = document.querySelector(".od-capture-body .tiptap p");
+            const titleStart = title.getBoundingClientRect().left +
+              parseFloat(getComputedStyle(title).paddingInlineStart);
+            return Math.abs(titleStart - body.getBoundingClientRect().left) < 1;
+          })()`),
+          true,
+        );
+        await script(`[...document.querySelectorAll(".od-capture .od-dialog-actions button")]
+          .find((button) => button.textContent === "キャンセル").click()`);
         await script('document.querySelector(".od-search-trigger").click()');
         await waitFor(
           'document.activeElement.matches(".od-search-dialog input") && document.activeElement.value === ""',

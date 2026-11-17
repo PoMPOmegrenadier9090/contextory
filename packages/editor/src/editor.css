@@ -556,16 +556,18 @@
   background: var(--pe-subtle, #f8f6f1);
 }
 
-.pe-edit-area {
+:root {
   --pe-selection-gutter-width: 14px;
   --pe-grip-size: 24px;
+  --pe-text-inset: calc(var(--pe-selection-gutter-width) + var(--pe-grip-size));
+}
+
+.pe-edit-area {
   --pe-row-height: 31px;
   --pe-list-indent: 22px;
   --pe-object-list-outdent: 26px;
   position: relative;
-  padding-inline-start: calc(
-    var(--pe-selection-gutter-width) + var(--pe-grip-size)
-  );
+  padding-inline-start: var(--pe-text-inset);
 }
 
 .pe-select-gutter {
@@ -628,8 +630,11 @@
 }
 
 @media (pointer: coarse) {
-  .pe-edit-area {
+  :root {
     --pe-grip-size: 44px;
+  }
+
+  .pe-edit-area {
     --pe-row-height: 44px;
   }
 
