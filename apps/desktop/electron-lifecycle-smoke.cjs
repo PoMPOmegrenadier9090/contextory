@@ -476,6 +476,43 @@ if (typeof electron === "string") {
         await waitFor(
           'document.querySelector(".od-page-title")?.value === "Edited View row"',
         );
+        await waitFor(
+          'document.querySelector(".od-document .tiptap p")?.textContent.includes("本文だけの照合語")',
+        );
+        await script(`(() => {
+          const editor = document.querySelector(".od-document .tiptap");
+          const paragraph = editor.querySelector("p");
+          editor.focus();
+          const range = document.createRange();
+          range.selectNodeContents(paragraph);
+          range.collapse(false);
+          getSelection().removeAllRanges();
+          getSelection().addRange(range);
+        })()`);
+        await webContents.insertText(" @");
+        await waitFor('!!document.querySelector(".pe-menu[role=listbox]")');
+        const caret = () =>
+          script(`(() => {
+          const selection = getSelection();
+          const paragraph = document.querySelector(".od-document .tiptap p");
+          if (!selection?.isCollapsed || !paragraph.contains(selection.anchorNode)) return null;
+          const before = document.createRange();
+          before.setStart(paragraph, 0);
+          before.setEnd(selection.anchorNode, selection.anchorOffset);
+          return before.toString();
+        })()`);
+        /** @type {unknown} */
+        const beforeEscape = await caret();
+        assert.match(String(beforeEscape), / @$/);
+        key("Escape");
+        await waitFor('!document.querySelector(".pe-menu[role=listbox]")');
+        assert.equal(
+          await script(
+            'document.activeElement.matches(".od-document .tiptap")',
+          ),
+          true,
+        );
+        assert.equal(await caret(), beforeEscape);
         await script('document.querySelector(".od-search-trigger").click()');
         await waitFor(
           'document.activeElement.matches(".od-search-dialog input") && document.activeElement.value === ""',

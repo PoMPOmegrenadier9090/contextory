@@ -1187,7 +1187,12 @@ const createMenus = (
             x: rect?.left ?? 0,
             y: (rect?.bottom ?? 0) + 6,
             pick: (item) => props.command(item),
-            dismiss: () => exitSuggestion(props.editor.view, key),
+            dismiss: () => {
+              const view = props.editor.view;
+              const focused = view.hasFocus();
+              exitSuggestion(view, key);
+              if (focused) view.focus();
+            },
           });
         };
         return {
@@ -1696,21 +1701,18 @@ export const ObjectEditor = ({
 
   editorRef.current = editor;
 
-  const suggestionOpen = Boolean(menu?.items.length);
   useEffect(() => {
-    if (!suggestionOpen) return;
     const dismiss = (event: KeyboardEvent): void => {
       const current = shown.current.menu;
-      if (event.key !== "Escape" || event.isComposing || !current?.items.length)
-        return;
+      if (event.key !== "Escape" || event.isComposing || !current) return;
       event.preventDefault();
       event.stopPropagation();
       current.dismiss();
     };
-    // 本文からフォーカスが外れると、エディタ自身のキー処理には届かない。
-    document.addEventListener("keydown", dismiss, true);
-    return () => document.removeEventListener("keydown", dismiss, true);
-  }, [suggestionOpen]);
+    // 候補を、エディタや外側のダイアログのEsc処理より先に閉じる。
+    window.addEventListener("keydown", dismiss, true);
+    return () => window.removeEventListener("keydown", dismiss, true);
+  }, []);
 
   // 画面外でメニューが残らないよう、エディタを離れたら閉じる。
   useEffect(() => () => setMenu(null), []);
