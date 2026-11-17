@@ -162,6 +162,10 @@ html {
   backdrop-filter: blur(14px);
 }
 
+[data-desktop-platform="mac"] .od-topbar {
+  padding-inline-start: 88px;
+}
+
 .od-topbar > div {
   display: flex;
   gap: 12px;

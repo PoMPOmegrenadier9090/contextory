@@ -229,6 +229,14 @@ if (typeof electron === "string") {
         const { webContents } = window;
         const script = (/** @type {string} */ code) =>
           webContents.executeJavaScript(code);
+        if (process.platform === "darwin")
+          assert.equal(
+            await script(`document.documentElement.dataset.desktopPlatform === "mac"
+              && document.querySelector(".od-menu-toggle").getBoundingClientRect().left >= 88
+              && document.querySelector(".od-search-trigger").getBoundingClientRect().left >
+                document.querySelector(".od-menu-toggle").getBoundingClientRect().right`),
+            true,
+          );
         const deadline = Date.now() + 5_000;
         while (
           !(await script(
