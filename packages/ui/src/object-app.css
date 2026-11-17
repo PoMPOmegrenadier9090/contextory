@@ -1459,53 +1459,193 @@ html {
 }
 
 .od-search-dialog {
-  width: min(540px, calc(100% - 32px));
-  max-height: min(620px, calc(100% - 32px));
+  --od-search-top: clamp(16px, 14dvh, 112px);
+  box-sizing: border-box;
+  inset-block: var(--od-search-top) auto;
+  width: min(560px, calc(100% - 24px));
+  max-height: min(560px, calc(100dvh - var(--od-search-top) - 12px));
+  margin: 0 auto;
   overflow: auto;
-  padding: 16px;
+  padding: 0;
   color: var(--od-ink);
   background: var(--od-surface);
-  border: 1px solid var(--od-line-strong);
-  border-radius: 12px;
+  border: 1px solid var(--od-line);
+  border-radius: 16px;
+  box-shadow: 0 20px 72px rgb(10 15 12 / 26%);
+}
+
+.od-search-dialog:modal {
   overscroll-behavior: contain;
 }
 
 .od-search-dialog::backdrop {
-  background: color-mix(in srgb, var(--od-ink) 24%, transparent);
-}
-
-body:has(.od-search-dialog:modal) {
   overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(18 23 20 / 34%);
+  backdrop-filter: blur(3px);
 }
 
-.od-search-dialog header,
-.od-search-dialog li button {
+.od-search-bar {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
   align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--od-surface);
 }
 
-.od-search-dialog h2 {
-  margin: 0 0 10px;
-  font-size: 18px;
+.od-search-query {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  color: var(--od-muted);
 }
 
-.od-search-dialog input,
-.od-search-dialog li button {
+.od-search-query::before,
+.od-search-query::after {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.od-search-query::before {
+  inset-block-start: 14px;
+  inset-inline-start: 5px;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.od-search-query::after {
+  inset-block-start: 26px;
+  inset-inline-start: 17px;
+  width: 6px;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  transform-origin: left center;
+}
+
+.od-search-query input {
+  box-sizing: border-box;
   width: 100%;
-  padding: 8px 10px;
+  height: 44px;
+  padding: 0 6px 0 34px;
+  color: var(--od-ink);
+  font: inherit;
+  font-size: 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
 }
 
-.od-search-dialog ul {
-  margin: 0;
+.od-search-query input::placeholder {
+  color: var(--od-muted);
+}
+
+.od-search-close,
+.od-search-results button {
+  color: inherit;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.od-search-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
   padding: 0;
+  color: var(--od-muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.od-search-close span:last-child {
+  display: none;
+}
+
+@media (hover: none) {
+  .od-search-close span:first-child {
+    display: none;
+  }
+
+  .od-search-close span:last-child {
+    display: inline;
+    font-size: 20px;
+  }
+}
+
+.od-search-close:hover,
+.od-search-results button:hover,
+.od-search-dialog:has(input:focus) .od-search-results li:first-child button {
+  background: var(--od-subtle);
+}
+
+.od-search-dialog :is(input, button):focus-visible {
+  outline: 2px solid var(--od-accent);
+  outline-offset: -2px;
+}
+
+.od-search-dialog input:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--od-accent) 64%, var(--od-line));
+  outline-offset: 0;
+}
+
+.od-search-status {
+  margin: 0;
+  padding: 10px 16px 6px;
+  color: var(--od-muted);
+  font-size: 12px;
+  border-top: 1px solid var(--od-line);
+}
+
+.od-search-status:last-child {
+  padding-block: 14px;
+}
+
+.od-search-results {
+  margin: 0;
+  padding: 0 8px 8px;
   list-style: none;
 }
 
-.od-search-dialog small,
-.od-search-dialog p {
-  color: var(--od-muted);
+.od-search-results button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 9px;
+  text-align: start;
+}
+
+.od-search-results button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.od-search-results small {
+  padding: 3px 7px;
+  color: var(--od-type, var(--od-muted));
+  font-size: 11px;
+  white-space: nowrap;
+  background: var(--od-type-soft, var(--od-subtle));
+  border-radius: 5px;
+}
+
+@media (max-width: 600px) {
+  .od-search-dialog {
+    --od-search-top: 12px;
+  }
 }
 
 .od-embedded-view {

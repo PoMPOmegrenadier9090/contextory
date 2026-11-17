@@ -58,47 +58,52 @@ export const ObjectSearch = ({
       <dialog
         ref={dialog}
         className="od-search-dialog"
-        aria-labelledby="od-search-title"
+        aria-label="Objectを検索"
         onClose={() => {
           setVisible(false);
           setQuery("");
           setResult(null);
         }}
       >
-        <header>
-          <h2 id="od-search-title">Objectを検索</h2>
-          <form method="dialog">
-            <button type="submit" aria-label="検索を閉じる">
-              ×
-            </button>
-          </form>
-        </header>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (current?.objects?.[0]) pick(current.objects[0].id);
-          }}
-        >
-          <input
-            type="search"
-            aria-label="Objectのタイトル"
-            placeholder="タイトルで検索"
-            autoFocus
-            value={query}
-            onChange={(event) => {
-              if (event.currentTarget.value.trim() !== term) setResult(null);
-              setQuery(event.currentTarget.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.nativeEvent.isComposing)
-                return;
+        <header className="od-search-bar">
+          <form
+            className="od-search-query"
+            onSubmit={(event) => {
               event.preventDefault();
               if (current?.objects?.[0]) pick(current.objects[0].id);
             }}
-          />
-        </form>
+          >
+            <input
+              type="search"
+              aria-label="Objectのタイトル"
+              placeholder="Objectのタイトルを検索"
+              autoFocus
+              value={query}
+              onChange={(event) => {
+                if (event.currentTarget.value.trim() !== term) setResult(null);
+                setQuery(event.currentTarget.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                  return;
+                event.preventDefault();
+                if (current?.objects?.[0]) pick(current.objects[0].id);
+              }}
+            />
+          </form>
+          <form method="dialog">
+            <button
+              className="od-search-close"
+              type="submit"
+              aria-label="検索を閉じる"
+            >
+              <span aria-hidden="true">Esc</span>
+              <span aria-hidden="true">×</span>
+            </button>
+          </form>
+        </header>
         {term ? (
-          <p role="status">
+          <p className="od-search-status" role="status">
             {!current
               ? "検索中…"
               : current.objects === null
@@ -109,12 +114,14 @@ export const ObjectSearch = ({
           </p>
         ) : null}
         {current?.objects?.length ? (
-          <ul>
+          <ul className="od-search-results">
             {current.objects.map((object) => (
               <li key={object.id}>
                 <button type="button" onClick={() => pick(object.id)}>
                   <span>{object.title}</span>
-                  <small>{typeLabel(object.type)}</small>
+                  <small data-type={object.type}>
+                    {typeLabel(object.type)}
+                  </small>
                 </button>
               </li>
             ))}
