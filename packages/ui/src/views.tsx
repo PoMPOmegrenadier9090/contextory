@@ -154,8 +154,10 @@ export const ViewTabs = ({
 }: ViewTabsProps & { readonly embeddedViewId?: string }): React.JSX.Element => {
   const views = owner.views.filter((candidate) => candidate.scope === scope);
   /** 前回開いていたView。種別とページの範囲ごとに覚える。 */
-  const selectedKey = `view:${owner.name}:${scope}`;
-  const selected = embeddedViewId ?? shared[selectedKey];
+  const selectedKey = embeddedViewId
+    ? `view:embed:${embeddedViewId}:${anchorId ?? ""}`
+    : `view:${owner.name}:${scope}`;
+  const selected = shared[selectedKey] ?? embeddedViewId;
   const choose = (id: string): void => share(selectedKey, id);
   /** 絞り込みの窓で開いているField */
   const [filtering, setFiltering] = useState<string | null>(null);
@@ -168,7 +170,10 @@ export const ViewTabs = ({
     readonly viewId: string;
     readonly data: ViewResult | null;
   } | null>(null);
-  const view = views.find((candidate) => candidate.id === selected) ?? views[0];
+  const view =
+    views.find((candidate) => candidate.id === selected) ??
+    views.find((candidate) => candidate.id === embeddedViewId) ??
+    views[0];
   const viewId = view?.id;
   /** 階層で、配下を畳んでいる行。Viewごとに覚える。 */
   const foldKey = `fold:${viewId ?? ""}`;
@@ -708,13 +713,22 @@ export const ViewTabs = ({
           <button
             type="button"
             onClick={() => {
+              if (
+                embeddedViewId &&
+                !window.confirm(
+                  `「${view.name}」を元のページと埋め込みの両方から削除しますか？`,
+                )
+              )
+                return;
               close();
               saveViews(owner.views.filter((v) => v.id !== view.id));
             }}
           >
-            このViewを削除
+            {embeddedViewId ? "元のViewを削除" : "このViewを削除"}
           </button>
-          {scope === "object" ? (
+          {embeddedViewId ? (
+            <p>設定は元のViewと共有されます。</p>
+          ) : scope === "object" ? (
             <p>このViewは、#{typeLabel(owner.name)}のすべてのページに出る</p>
           ) : null}
         </div>
@@ -1012,7 +1026,12 @@ export const ViewTabs = ({
   };
 
   const tableView = (
-    <div className="od-table-wrap">
+    <div
+      className="od-table-wrap"
+      role="region"
+      aria-label={view.name}
+      tabIndex={0}
+    >
       <table className="od-table">
         <thead>
           <tr>
@@ -1336,64 +1355,11 @@ export const ViewTabs = ({
     return items;
   };
 
-  if (embeddedViewId)
-    return (
-      <section className="od-embedded-view" aria-label={view.name}>
-        <h3>{view.name}</h3>
-        {!data ? (
-          <p className="od-empty">
-            {loaded?.viewId === viewId
-              ? "Viewを読み込めませんでした。"
-              : "読み込み中…"}
-          </p>
-        ) : table && data.rows.length ? (
-          <div className="od-table-wrap">
-            <table className="od-table">
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  {columns.map((field) => (
-                    <th key={field.id}>{field.name}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.rows.map((row, index) => (
-                  <tr key={`${row.object.id}-${index}`}>
-                    <td style={{ paddingInlineStart: 8 + row.depth * 20 }}>
-                      <button type="button" onClick={() => open(row.object.id)}>
-                        {row.object.title}
-                      </button>
-                    </td>
-                    {columns.map((field) => (
-                      <td key={field.id}>
-                        {field.kind === "context"
-                          ? row.object.contexts
-                              .map(
-                                (id) =>
-                                  data.objects[id]?.title ??
-                                  lookup(id)?.title ??
-                                  "…",
-                              )
-                              .join("、")
-                          : textOf(row.values[field.id] ?? [])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : data.entries.length ? (
-          <ul className="od-timeline">{timeline(data.entries)}</ul>
-        ) : (
-          <p className="od-empty">まだありません。</p>
-        )}
-      </section>
-    );
-
   return (
-    <section className="od-panel">
+    <section
+      className={embeddedViewId ? "od-embedded-view" : "od-panel"}
+      aria-label={embeddedViewId ? view.name : undefined}
+    >
       {tabs}
       <div className="od-view-tools">
         {display}
@@ -1401,7 +1367,13 @@ export const ViewTabs = ({
         {filter}
         {more}
       </div>
-      {table ? (
+      {embeddedViewId && !data ? (
+        <p className="od-empty">
+          {loaded?.viewId === viewId
+            ? "Viewを読み込めませんでした。"
+            : "読み込み中…"}
+        </p>
+      ) : table ? (
         tableView
       ) : data?.entries.length ? (
         <ul className="od-timeline">{timeline(data.entries)}</ul>

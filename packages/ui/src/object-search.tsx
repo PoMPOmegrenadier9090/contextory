@@ -46,6 +46,7 @@ export const ObjectSearch = ({
     <>
       <button
         type="button"
+        className="od-search-trigger"
         onClick={() => {
           setVisible(true);
           dialog.current?.showModal();

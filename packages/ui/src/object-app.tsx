@@ -873,7 +873,7 @@ export const ObjectApp = ({
           >
             ☰
           </button>
-          <span className="od-product">Contextory</span>
+          <ObjectSearch client={client} open={open} />
           <span
             className="od-save-status"
             role="status"
@@ -888,7 +888,6 @@ export const ObjectApp = ({
           </span>
         </div>
         <div className="od-topbar-actions">
-          <ObjectSearch client={client} open={open} />
           <button
             type="button"
             title="Memoを書く（⌘⇧M）"

@@ -230,7 +230,14 @@ const ViewBlock = Node.create({
     "div",
     mergeAttributes(HTMLAttributes, { "data-view-embed": "" }),
   ],
-  addNodeView: () => ReactNodeViewRenderer(EmbeddedViewNode),
+  addNodeView: () =>
+    ReactNodeViewRenderer(EmbeddedViewNode, {
+      stopEvent: ({ event }) =>
+        event.target instanceof Element &&
+        event.target.closest(
+          "button, input, select, textarea, [role=region]",
+        ) !== null,
+    }),
 });
 
 const EmbeddedViewNode = ({ node }: NodeViewProps): React.JSX.Element => {

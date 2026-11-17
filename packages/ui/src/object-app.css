@@ -168,10 +168,16 @@ html {
   align-items: center;
 }
 
-.od-product {
-  font-family: Georgia, "Yu Mincho", serif;
-  font-size: 20px;
+.od-demo .od-search-trigger {
+  min-height: 32px;
+  padding-inline: 10px;
+  color: var(--od-ink);
+  font: inherit;
   font-weight: 600;
+  background: var(--od-subtle);
+  border: 1px solid var(--od-line);
+  border-radius: 7px;
+  cursor: pointer;
 }
 
 .od-label {
@@ -1271,6 +1277,7 @@ html {
 
 /* table */
 .od-table-wrap {
+  max-inline-size: 100%;
   overflow-x: auto;
 }
 
@@ -1506,10 +1513,6 @@ body:has(.od-search-dialog:modal) {
   padding: 10px 12px;
   border: 1px solid var(--od-line);
   border-radius: 8px;
-}
-
-.od-embedded-view h3 {
-  margin: 0 0 8px;
 }
 
 .pe-editor .tiptap .od-embedded-view .od-timeline {

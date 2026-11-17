@@ -159,6 +159,29 @@ if (typeof electron === "string") {
           },
           content: [{ type: "objectTitle", content: text(label) }],
         });
+        const task = store.types().find((type) => type.name === "task");
+        const table = task?.views.find((view) => view.scope === "type");
+        assert.ok(task && table);
+        store.updateType("task", {
+          views: [
+            ...task.views,
+            {
+              ...table,
+              id: "smoke-timeline",
+              name: "View smoke timeline",
+              layout: "timeline",
+            },
+          ],
+        });
+        store.createObject(
+          {
+            id: "view-smoke-row",
+            type: "task",
+            title: "Editable View row",
+            parentId: null,
+          },
+          Date.now(),
+        );
         store.savePage(
           key,
           {
@@ -174,6 +197,10 @@ if (typeof electron === "string") {
                   type: "listItem",
                   content: [{ type: "paragraph", content: text(label) }],
                 })),
+              },
+              {
+                type: "viewEmbed",
+                attrs: { viewId: table.id, anchorId: null },
               },
             ],
           },
@@ -386,6 +413,50 @@ if (typeof electron === "string") {
         await touch("touchEnd", []);
         assert.deepEqual(await marked(), ["Two", "One"]);
         webContents.debugger.detach();
+
+        const waitFor = async (/** @type {string} */ condition) => {
+          const until = Date.now() + 4_000;
+          while (!(await script(condition))) {
+            if (Date.now() >= until)
+              throw new Error(`Embedded View did not update: ${condition}`);
+            await pause();
+          }
+        };
+        await waitFor(
+          '!!document.querySelector(".od-embedded-view input[aria-label=Title]")',
+        );
+        assert.equal(
+          await script(`["並べ替え", "絞り込み"].every(label =>
+          document.querySelector('.od-embedded-view button[aria-label="' + label + '"]')
+        )`),
+          true,
+        );
+        await script(`(() => {
+          const field = document.querySelector(".od-embedded-view input[value='Editable View row']");
+          field.focus();
+          field.select();
+        })()`);
+        await webContents.insertText("Edited View row");
+        await script("document.activeElement.blur()");
+        await waitFor(
+          'window.pkm.searchObjects("Edited View row").then((rows) => rows[0]?.id === "view-smoke-row")',
+        );
+
+        await script(`[...document.querySelectorAll(".od-embedded-view .od-view-tabs > button")]
+          .find((button) => button.textContent === "View smoke timeline").click()`);
+        await waitFor(
+          'document.querySelector(".od-embedded-view .od-timeline")?.textContent.includes("Edited View row")',
+        );
+        await script(
+          'document.querySelector(".od-topbar > div:first-child .od-search-trigger").click()',
+        );
+        assert.equal(
+          await script(
+            'document.activeElement.matches(".od-search-dialog input")',
+          ),
+          true,
+        );
+        await script('document.querySelector(".od-search-dialog").close()');
       } else if (phase === "remote") {
         const url = process.argv[4];
         /** @type {unknown} */
