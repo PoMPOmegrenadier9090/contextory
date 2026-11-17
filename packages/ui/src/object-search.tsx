@@ -16,6 +16,7 @@ export const ObjectSearch = ({
   readonly openType: (name: string) => void;
 }): React.JSX.Element => {
   const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [visible, setVisible] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
@@ -28,6 +29,31 @@ export const ObjectSearch = ({
   const current = result?.query === term ? result : null;
   const hits = current?.hits;
   const activeId = hits?.[selected] ? `${listId}-${selected}` : undefined;
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (
+        !event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.key.toLowerCase() !== "k"
+      )
+        return;
+      if (
+        !dialog.current?.open &&
+        document.querySelector(
+          'dialog[open], [role="dialog"][aria-modal="true"]',
+        )
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat && !dialog.current?.open) trigger.current?.click();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
   useEffect(() => {
     if (activeId)
       document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
@@ -58,8 +84,11 @@ export const ObjectSearch = ({
   return (
     <>
       <button
+        ref={trigger}
         type="button"
         className="od-search-trigger"
+        aria-keyshortcuts="Meta+K"
+        title="検索（⌘K）"
         onClick={() => {
           setQuery("");
           setSelected(0);
