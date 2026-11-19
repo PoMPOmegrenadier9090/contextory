@@ -99,8 +99,9 @@ describe("object API", () => {
       title: "やること",
       contexts: ["project"],
     });
-    // 先頭はProject自身のField行、その次が埋め込んだTask。
+    // 先頭はProject自身のField行（Contextと参照）、その次が埋め込んだTask。
     expect(page.doc.content?.map((node) => node.type)).toEqual([
+      "objectField",
       "objectField",
       "objectBlock",
     ]);
@@ -111,7 +112,11 @@ describe("object API", () => {
     });
     expect(patched.json()).toMatchObject({
       name: "task",
-      fields: [{ id: "context" }, { id: "due", name: "期限" }],
+      fields: [
+        { id: "context" },
+        { id: "related" },
+        { id: "due", name: "期限" },
+      ],
     });
     expect(
       (

@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   normalizeObjectType,
@@ -367,11 +371,13 @@ describe("ObjectStore", () => {
     expect(store.getObject("new").contexts).toEqual(["area"]);
     expect(store.loadPage("project").doc.content).toMatchObject([
       { type: "objectField", attrs: { fieldId: "context", name: "Context" } },
+      { type: "objectField", attrs: { fieldId: "related", name: "参照" } },
       {
         type: "objectBlock",
         content: [
           { type: "objectTitle" },
           { type: "objectField", content: [ref("area"), text(" ")] },
+          { type: "objectField", attrs: { fieldId: "related" } },
           {
             type: "objectField",
             attrs: { fieldId: "due", name: "期限" },
@@ -387,7 +393,7 @@ describe("ObjectStore", () => {
       11,
     );
     expect(store.getObject("new").contexts).toEqual(["project"]);
-    expect(store.loadPage("new").doc.content?.[1]).toEqual({
+    expect(store.loadPage("new").doc.content?.[2]).toEqual({
       type: "objectField",
       attrs: { fieldId: "due", name: "期限" },
     });
@@ -411,7 +417,7 @@ describe("ObjectStore", () => {
       color: "rose",
       builtin: false,
       checkbox: true,
-      fields: [{ id: "context" }, { id: "place" }],
+      fields: [{ id: "context" }, { id: "related" }, { id: "place" }],
     });
     // 種別の名前を変えても、Viewはそのまま使える。
     expect(
@@ -422,7 +428,7 @@ describe("ObjectStore", () => {
     store.updateType("meeting", { fields: [] });
     expect(
       store.loadPage(DAILY).doc.content?.[0]?.content?.map((n) => n.type),
-    ).toEqual(["objectTitle", "objectField"]);
+    ).toEqual(["objectTitle", "objectField", "objectField"]);
     expect(() => store.updateType("task", { name: "todo" })).toThrow(TypeError);
     expect(() => store.updateType("meeting", { name: "task" })).toThrow(
       TypeError,
@@ -528,7 +534,7 @@ describe("ObjectStore", () => {
     });
     expect(store.types().find((type) => type.name === "1on1")).toMatchObject({
       extends: "会議",
-      fields: [{ id: "context" }, { id: "who" }],
+      fields: [{ id: "context" }, { id: "related" }, { id: "who" }],
       inherited: [{ id: "when" }, { id: "state", options: ["予定", "済"] }],
     });
     expect(() => store.updateType("会議", { extends: "1on1" })).toThrow(
@@ -559,6 +565,7 @@ describe("ObjectStore", () => {
       .doc.content?.[1]?.content?.map((node) => [node.type, node.attrs]);
     expect(rows?.slice(1)).toMatchObject([
       ["objectField", { fieldId: "context" }],
+      ["objectField", { fieldId: "related" }],
       ["objectField", { fieldId: "who" }],
       ["objectFieldControl", { fieldId: "when", value: "2026-11-20" }],
       [
@@ -791,5 +798,117 @@ describe("ObjectStore", () => {
   it("refuses contexts that would create a cycle and unknown hosts", () => {
     expect(() => store.addContext("area", "task")).toThrow("cycle");
     expect(() => store.loadPage("missing")).toThrow(ObjectStoreError);
+  });
+
+  /** 参照の行が指すObject。 */
+  const related = (id: string): string[] =>
+    store
+      .loadPage(id)
+      .doc.content?.find((node) => node.attrs?.fieldId === "related")
+      ?.content?.flatMap((node) =>
+        node.type === "objectRef" ? [String(node.attrs?.objectId)] : [],
+      ) ?? [];
+
+  it("keeps one parent per object and moves the rest to the references", () => {
+    store.savePage(
+      DAILY,
+      doc(
+        block("person", "Person", "田中さん", field("context", ref("project"))),
+        block(
+          "memoB",
+          "memo",
+          "B",
+          field("context", ref("person"), ref("project")),
+        ),
+      ),
+      10,
+    );
+    // 具象は活動の下に置かない。活動はMemoの所属として優先する。
+    expect(store.getObject("person").contexts).toEqual([]);
+    expect(related("person")).toEqual(["project"]);
+    expect(store.getObject("memoB").contexts).toEqual(["project"]);
+    expect(related("memoB")).toEqual(["person"]);
+
+    // 具象の下にはTaskを置けるが、Projectは置けない。
+    store.addContext("task", "person");
+    expect(store.getObject("task").contexts).toEqual(["person"]);
+    expect(() => store.addContext("other", "person")).toThrow("not allowed");
+    expect(() => store.addContext("area", "project")).toThrow(ObjectStoreError);
+    // Projectの中で作った具象は、所属なしになる。
+    expect(
+      store.savePage("project", doc(block("co", "Company", "A社")), 11).objects
+        .co?.contexts,
+    ).toEqual([]);
+    // 種別が変わって親になれなくなったら、所属を参照へ移す。
+    store.patchObject("task", { type: "project" }, 12);
+    expect(store.getObject("task").contexts).toEqual([]);
+    expect(related("task")).toEqual(["person"]);
+  });
+
+  it("does not aggregate memos through a shared entity", () => {
+    store.importWorkspace(
+      {
+        objects: [
+          record("areaA", "area", [], 1),
+          record("areaB", "area", [], 2),
+          record("projectB", "project", ["areaB"], 3),
+          record("person", "Person", ["areaA", "projectB"], 4),
+          record("memoB", "memo", ["person"], 5),
+        ],
+        documents: {},
+      },
+      10,
+    );
+    const ids = (id: string): string[] =>
+      store
+        .timeline(id)
+        .flatMap((entry) => (entry.kind === "object" ? [entry.object.id] : []));
+    // Personは参照で両方の活動に現れるが、配下のMemoは流れ込まない。
+    expect(ids("areaA")).toEqual(["person"]);
+    expect(ids("areaB")).toEqual(["person", "projectB"]);
+    expect(ids("person")).toContain("memoB");
+  });
+
+  it("migrates multiple contexts to one parent and references", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pkm-store-"));
+    try {
+      const path = join(dir, "objects.sqlite");
+      const old = new ObjectStore(path);
+      old.importWorkspace(
+        {
+          objects: [
+            record("area", "area", [], 1),
+            record("project", "project", ["area"], 2),
+            record("person", "Person", [], 3),
+            record("memo", "memo", [], 4),
+          ],
+          documents: {},
+        },
+        10,
+      );
+      old.close();
+      // v7までは、Contextを複数持てた。
+      const raw = new Database(path);
+      raw.exec(`
+        INSERT INTO contexts VALUES ('person', 'area', 0), ('person', 'project', 1),
+          ('memo', 'person', 0), ('memo', 'project', 1);
+        PRAGMA user_version = 7;
+      `);
+      raw.close();
+      const migrated = new ObjectStore(path);
+      expect(migrated.getObject("person").contexts).toEqual([]);
+      expect(migrated.getObject("memo").contexts).toEqual(["project"]);
+      // 外れたContextは参照に残り、参照先のTimelineに届く。
+      expect(
+        migrated
+          .timeline("area")
+          .some(
+            (entry) => entry.kind === "object" && entry.object.id === "person",
+          ),
+      ).toBe(true);
+      migrated.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

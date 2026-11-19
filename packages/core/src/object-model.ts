@@ -45,6 +45,36 @@ export const CONTEXT_FIELD: FieldDefinition = {
   kind: "context",
 };
 
+/** すべての種別が持つ参照の行。所属のほかに関係するObjectを指し、集約ではたどらない。 */
+export const RELATED_FIELD: FieldDefinition = {
+  id: "related",
+  name: "参照",
+  kind: "reference",
+};
+
+/** 集約の軸になる、活動の種別。 */
+export const ACTIVITY_TYPES: readonly ObjectType[] = [
+  "area",
+  "project",
+  "task",
+];
+
+/**
+ * 親子にできる種別の組か。引数は組み込みの種別で、nullはユーザーが作った具象。
+ * 具象を活動の下に置かないので、活動の集約は具象の先へ進まない。
+ */
+export const canContain = (
+  parent: ObjectType | null,
+  child: ObjectType | null,
+): boolean => {
+  if (child === "memo" || child === "decision") return true;
+  if (child === "area") return false;
+  if (child === "project") return parent === "area" || parent === "project";
+  // shortcut: Area直下のTaskは未決定なので許す。決めたらここで絞る。
+  if (child === "task") return parent !== "memo" && parent !== "decision";
+  return parent === null;
+};
+
 export const TYPE_COLORS = [
   "blue",
   "amber",
