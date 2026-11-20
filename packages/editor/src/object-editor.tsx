@@ -49,6 +49,7 @@ import {
   CONTEXT_FIELD,
   newId,
   normalizeObjectType,
+  RELATED_FIELD,
   typeRole,
   type DocNode,
   type ObjectType,
@@ -90,6 +91,8 @@ export interface EditorHost {
     viewId: string,
     anchorId: string | null,
   ) => React.ReactNode;
+  /** 開いている活動。具象の中で作るObjectの所属に使う。 */
+  readonly activity?: string | null;
   /** 開いている文書がObjectの本文なら、そのObject。 */
   readonly page: { readonly id: string; readonly type: ObjectType } | null;
   /** 種別のページを開く。 */
@@ -162,6 +165,26 @@ const inheritedAt = ($pos: ResolvedPos, host: EditorHost): string[] => {
   }
   if (!host.page) return [];
   return host.page.type === "memo" ? contextRefs($pos.doc) : [host.page.id];
+};
+
+/**
+ * $posに作るObjectの、所属と参照の初期値。具象は所属にならないので、具象の中では
+ * 開いている活動を所属にし、その具象を参照に残す。
+ */
+const startAt = (
+  $pos: ResolvedPos,
+  host: EditorHost,
+): { readonly context: string[]; readonly related: string[] } => {
+  const inherited = inheritedAt($pos, host);
+  let ownerType = host.page?.type;
+  for (let depth = $pos.depth; depth > 0; depth--)
+    if ($pos.node(depth).type.name === "objectBlock") {
+      ownerType = $pos.node(depth).attrs.type as ObjectType;
+      break;
+    }
+  return ownerType && ownerType !== "memo" && !roleOf(host, ownerType)
+    ? { context: host.activity ? [host.activity] : [], related: inherited }
+    : { context: inherited, related: [] };
 };
 
 /* ---------- nodes ---------- */
@@ -1032,6 +1055,12 @@ const fieldRows = (
 ): PMNode[] => {
   const { objectField, objectFieldControl, objectRef } = state.schema.nodes;
   const definition = typeOf(host, type);
+  const start = startAt($pos, host);
+  const refs = (ids: readonly string[]): PMNode[] =>
+    ids.flatMap((objectId) => [
+      objectRef!.create({ objectId }),
+      state.schema.text(" "),
+    ]);
   return (
     definition
       ? [...definition.fields, ...definition.inherited]
@@ -1046,12 +1075,11 @@ const fieldRows = (
         })
       : objectField!.create(
           { fieldId: field.id, name: field.name },
-          field.kind === "context"
-            ? inheritedAt($pos, host).flatMap((objectId) => [
-                objectRef!.create({ objectId }),
-                state.schema.text(" "),
-              ])
-            : null,
+          field.id === CONTEXT_FIELD.id
+            ? refs(start.context)
+            : field.id === RELATED_FIELD.id
+              ? refs(start.related)
+              : null,
         ),
   );
 };

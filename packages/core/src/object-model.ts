@@ -61,18 +61,16 @@ export const ACTIVITY_TYPES: readonly ObjectType[] = [
 
 /**
  * 親子にできる種別の組か。引数は組み込みの種別で、nullはユーザーが作った具象。
- * 具象を活動の下に置かないので、活動の集約は具象の先へ進まない。
+ * Contextは常に活動を指し、Area→Project→Taskの順を守る。具象はContextを持たない。
  */
 export const canContain = (
   parent: ObjectType | null,
   child: ObjectType | null,
 ): boolean => {
-  if (child === "memo" || child === "decision") return true;
-  if (child === "area") return false;
-  if (child === "project") return parent === "area" || parent === "project";
-  // shortcut: Area直下のTaskは未決定なので許す。決めたらここで絞る。
-  if (child === "task") return parent !== "memo" && parent !== "decision";
-  return parent === null;
+  if (!ACTIVITY_TYPES.includes(parent ?? "")) return false;
+  if (child === "area" || child === null) return false;
+  if (child === "project") return parent !== "task";
+  return true;
 };
 
 /** 種別の役割。組み込みの種別か、それを継いだ種別ならその名前。nullは具象。 */
