@@ -16,6 +16,8 @@ export type {
   SplitResult,
 } from "./object-document.js";
 export {
+  ACTIVITY_TYPES,
+  canContain,
   CONTEXT_FIELD,
   DAILY_UNDATED_ID,
   FIELD_KINDS,
@@ -25,7 +27,9 @@ export {
   normalizeObjectType,
   PAGE_CONFLICT,
   OBJECT_TYPES,
+  RELATED_FIELD,
   TYPE_COLORS,
+  typeRole,
 } from "./object-model.js";
 export type {
   FieldDefinition,

@@ -585,8 +585,16 @@ html {
   font-size: 12px;
 }
 
+/* Inboxの件数 */
+.od-nav-count {
+  margin-left: 6px;
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
 /* ゴミ箱 */
 .od-demo .od-trash-row > button,
+.od-demo .od-inbox-row .od-pop > button,
 .od-demo .od-page-trash,
 .od-demo .od-panel > .od-danger {
   display: inline-block;

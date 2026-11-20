@@ -22,6 +22,8 @@ export interface ObjectOverview {
   readonly recent: readonly ObjectSummary[];
   /** 作った順。同じ日の別のMemoの中にあるMemoは、その中で読めるので除く。 */
   readonly memos: readonly DayMemo[];
+  /** 所属が決まっていないProject・Task・Memo・Decision。新しい順。 */
+  readonly inbox: readonly ObjectSummary[];
 }
 
 export interface ViewRow {

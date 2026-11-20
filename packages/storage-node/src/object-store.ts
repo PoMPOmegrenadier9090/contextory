@@ -3,6 +3,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import {
+  ACTIVITY_TYPES,
+  canContain,
   collectMentionUnits,
   CONTEXT_FIELD,
   DAILY_UNDATED_ID,
@@ -18,6 +20,7 @@ import {
   PAGE_CONFLICT,
   parseView,
   refIds,
+  RELATED_FIELD,
   splitDocument,
   timeFromId,
   TYPE_COLORS,
@@ -43,7 +46,7 @@ import {
 
 import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 7;
+export const OBJECT_STORE_SCHEMA_VERSION = 8;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const isDocumentId = (id: string): boolean =>
@@ -251,6 +254,19 @@ export class ObjectStore {
         this.database.pragma("user_version = 7");
       })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
+    if (version < 8)
+      this.database.transaction(() => {
+        // 所属を1つにする。外れたContextは消さずに参照へ移す。
+        const now = Date.now();
+        for (const id of this.database
+          .prepare("SELECT DISTINCT object_id FROM contexts")
+          .pluck()
+          .all() as string[]) {
+          this.assignContexts(id, this.contextsOf(id), true);
+          if (this.exists(id)) this.reindex(id, now);
+        }
+        this.database.pragma("user_version = 8");
+      })();
   }
 
   close(): void {
@@ -457,9 +473,12 @@ export class ObjectStore {
       ...field,
       ...(options ? { options: JSON.parse(options) as string[] } : {}),
     }));
-    return fields.some((field) => field.id === CONTEXT_FIELD.id)
+    const all = fields.some((field) => field.id === CONTEXT_FIELD.id)
       ? fields
       : [CONTEXT_FIELD, ...fields];
+    // 参照は保存せず、Contextの直後に必ず置く。
+    const at = all.findIndex((field) => field.id === CONTEXT_FIELD.id) + 1;
+    return [...all.slice(0, at), RELATED_FIELD, ...all.slice(at)];
   }
 
   /** 継承元を近い順に辿る。循環していても止まる。 */
@@ -484,7 +503,9 @@ export class ObjectStore {
     return this.ancestors(type)
       .reverse()
       .flatMap((ancestor) =>
-        this.ownFields(ancestor).filter((f) => f.id !== CONTEXT_FIELD.id),
+        this.ownFields(ancestor).filter(
+          (f) => f.id !== CONTEXT_FIELD.id && f.id !== RELATED_FIELD.id,
+        ),
       );
   }
 
@@ -523,15 +544,12 @@ export class ObjectStore {
   private saveFields(id: string, fields: readonly ObjectFieldContent[]): void {
     const row = this.requireRow(id);
     const known = new Map(this.fieldsOf(row.type).map((f) => [f.id, f]));
+    let contexts: readonly string[] | null = null;
     for (const field of fields) {
       const kind = known.get(field.id)?.kind;
-      if (kind === "context") {
-        this.setContexts(id, []);
-        // 存在しない相手や、循環になる相手は取り込まない。
-        for (const target of new Set(refIds(field.value)))
-          if (this.row(target) && !this.reaches(id, target))
-            this.setContexts(id, [...this.contextsOf(id), target]);
-      } else if (kind && field.value.length)
+      // 外れたContextを参照へ足すので、参照の行より後で保存する。
+      if (kind === "context") contexts = refIds(field.value);
+      else if (kind && field.value.length)
         this.database
           .prepare(
             `INSERT INTO field_values (object_id, field_id, value) VALUES (?, ?, ?)
@@ -544,6 +562,81 @@ export class ObjectStore {
             "DELETE FROM field_values WHERE object_id = ? AND field_id = ?",
           )
           .run(id, field.id);
+    }
+    if (contexts) this.assignContexts(id, contexts, true);
+  }
+
+  /** 種別の役割。組み込みの種別か、それを継いだ種別ならその名前。nullは具象。 */
+  private role(type: ObjectType): ObjectType | null {
+    const builtins: readonly string[] = OBJECT_TYPES;
+    return (
+      [type, ...this.ancestors(type)].find((t) => builtins.includes(t)) ?? null
+    );
+  }
+
+  /**
+   * 所属を1つに決める。活動を優先し、種別の組や循環で親になれない相手は外す。
+   * keepRestなら、外した相手を参照へ移す。ゴミ箱のObjectにも使う。
+   */
+  private assignContexts(
+    id: string,
+    targets: readonly string[],
+    keepRest: boolean,
+  ): void {
+    const type = this.database
+      .prepare("SELECT type FROM objects WHERE id = ?")
+      .pluck()
+      .get(id) as string | undefined;
+    if (type === undefined) return;
+    const role = this.role(type);
+    const live = [...new Set(targets)].filter((t) => t !== id && this.row(t));
+    const roleOf = (t: string): ObjectType | null =>
+      this.role(this.row(t)!.type);
+    const allowed = live.filter(
+      (t) => canContain(roleOf(t), role) && !this.reaches(id, t),
+    );
+    const parent =
+      allowed.find((t) => ACTIVITY_TYPES.includes(roleOf(t) ?? "")) ??
+      allowed[0];
+    this.setContexts(id, parent ? [parent] : []);
+    const rest = live.filter((t) => t !== parent);
+    if (!keepRest || !rest.length) return;
+    const current = this.database
+      .prepare(
+        "SELECT value FROM field_values WHERE object_id = ? AND field_id = ?",
+      )
+      .pluck()
+      .get(id, RELATED_FIELD.id) as string | undefined;
+    const related = new Set([
+      ...(current ? refIds(nodes(current)) : []),
+      ...rest,
+    ]);
+    this.database
+      .prepare(
+        `INSERT INTO field_values (object_id, field_id, value) VALUES (?, ?, ?)
+         ON CONFLICT(object_id, field_id) DO UPDATE SET value = excluded.value`,
+      )
+      .run(
+        id,
+        RELATED_FIELD.id,
+        JSON.stringify(
+          [...related].flatMap((objectId): DocNode[] => [
+            { type: "objectRef", attrs: { objectId } },
+            { type: "text", text: " " },
+          ]),
+        ),
+      );
+  }
+
+  /** 種別が変わったObjectと、その子の所属を確かめ直す。 */
+  private revalidate(id: string, now: number): void {
+    this.assignContexts(id, this.contextsOf(id), true);
+    for (const child of this.database
+      .prepare("SELECT object_id FROM contexts WHERE target_id = ?")
+      .pluck()
+      .all(id) as string[]) {
+      this.assignContexts(child, this.contextsOf(child), true);
+      if (this.row(child)) this.reindex(child, now);
     }
   }
 
@@ -714,24 +807,30 @@ export class ObjectStore {
         // 親も今回初めて現れた場合に備え、親から先に作る。
         if (parentId !== null && parentId !== hostId) ensure(parentId);
         // ゴミ箱にあったObjectは、文書に置いたことで戻す。Contextはそのまま。
-        const isNew = !this.exists(id);
+        const before = this.database
+          .prepare("SELECT type FROM objects WHERE id = ?")
+          .pluck()
+          .get(id) as string | undefined;
+        const type = normalizeObjectType(content.attrs.type) ?? "task";
         this.upsertObject(
           id,
-          normalizeObjectType(content.attrs.type) ?? "task",
+          type,
           content.title,
           content.body,
           Boolean(content.attrs.done),
           now,
         );
+        if (before !== undefined && before !== type) this.revalidate(id, now);
         // 文書木がContextの行を持つなら、後でその内容を正とする。
         const explicit = content.fields?.some(
           (field) => field.id === CONTEXT_FIELD.id,
         );
-        if (isNew && parentId !== null && !explicit) {
+        if (before === undefined && parentId !== null && !explicit) {
           const parent = this.row(parentId);
-          this.setContexts(
+          this.assignContexts(
             id,
             inheritedContexts(parent && this.summary(parent)),
+            false,
           );
         }
       };
@@ -803,9 +902,10 @@ export class ObjectStore {
         false,
         now,
       );
-      this.setContexts(
+      this.assignContexts(
         input.id,
         inheritedContexts(parent && this.summary(parent)),
+        false,
       );
     })();
     return this.getObject(input.id);
@@ -835,6 +935,7 @@ export class ObjectStore {
           value,
         })),
       );
+      if (type !== row.type) this.revalidate(id, now);
       if (type !== row.type)
         // 新しい種別に無いFieldの値は消す。
         this.database
@@ -920,17 +1021,23 @@ export class ObjectStore {
     })();
   }
 
+  /** 所属をtargetへ移す。所属は1つなので、前の所属は外れる。 */
   addContext(id: string, targetId: string): ObjectSummary {
     this.database.transaction(() => {
-      this.requireRow(id);
-      this.requireRow(targetId);
+      const row = this.requireRow(id);
+      const target = this.requireRow(targetId);
       // targetがすでにidの配下なら、循環になるので受け付けない。
       if (this.reaches(id, targetId))
         throw new ObjectStoreError(
           "INVALID_CONTEXT",
           "Context would create a cycle",
         );
-      this.setContexts(id, [...new Set([...this.contextsOf(id), targetId])]);
+      if (!canContain(this.role(target.type), this.role(row.type)))
+        throw new ObjectStoreError(
+          "INVALID_CONTEXT",
+          "Context is not allowed for these types",
+        );
+      this.setContexts(id, [targetId]);
     })();
     return this.getObject(id);
   }
@@ -1349,11 +1456,11 @@ export class ObjectStore {
           .run(patch.extends, name);
       }
       if (patch.fields) {
-        const rest = patch.fields.filter((f) => f.id !== CONTEXT_FIELD.id);
-        const fields = patch.fields.some((f) => f.id === CONTEXT_FIELD.id)
-          ? patch.fields.map((f) =>
-              f.id === CONTEXT_FIELD.id ? CONTEXT_FIELD : f,
-            )
+        // 参照はContextと同じく常に持つので、保存しない。
+        const given = patch.fields.filter((f) => f.id !== RELATED_FIELD.id);
+        const rest = given.filter((f) => f.id !== CONTEXT_FIELD.id);
+        const fields = given.some((f) => f.id === CONTEXT_FIELD.id)
+          ? given.map((f) => (f.id === CONTEXT_FIELD.id ? CONTEXT_FIELD : f))
           : [CONTEXT_FIELD, ...rest];
         for (const field of rest)
           if (
@@ -1649,6 +1756,12 @@ export class ObjectStore {
       navigation: select("type IN ('area', 'project') ORDER BY created_at"),
       recent,
       memos,
+      // Areaと具象は所属を持たないのが普通なので、未整理として扱わない。
+      inbox: select(
+        `NOT EXISTS (SELECT 1 FROM contexts c JOIN objects p ON p.id = c.target_id
+           WHERE c.object_id = objects.id AND p.deleted_at IS NULL)
+         ORDER BY created_at DESC`,
+      ).filter((o) => !["area", null].includes(this.role(o.type))),
     };
   }
 
@@ -1769,8 +1882,10 @@ export class ObjectStore {
           object.done,
           object.createdAt,
         );
-        this.setContexts(object.id, object.contexts);
       }
+      // 親が後から現れることがあるので、全件そろってから所属を決める。
+      for (const object of workspace.objects)
+        this.assignContexts(object.id, object.contexts, true);
       const insert = this.database.prepare(
         "INSERT INTO documents (id, body, updated_at) VALUES (?, ?, ?)",
       );

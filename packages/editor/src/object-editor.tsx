@@ -45,9 +45,11 @@ import {
   type RefObject,
 } from "react";
 import {
+  canContain,
   CONTEXT_FIELD,
   newId,
   normalizeObjectType,
+  typeRole,
   type DocNode,
   type ObjectType,
   type TypeDefinition,
@@ -907,30 +909,64 @@ const insertRef = (editor: Editor, range: Range, objectId: string): void => {
     .run();
 };
 
+const roleOf = (host: EditorHost, type: ObjectType): ObjectType | null =>
+  typeRole(type, (t) => typeOf(host, t)?.extends);
+
+/** posがContextの行の中なら、行の範囲と、所属を決めるObjectの種別。 */
+const contextFieldAt = (
+  editor: Editor,
+  host: EditorHost,
+  pos: number,
+): (Range & { readonly type: ObjectType }) | null => {
+  const $pos = editor.state.doc.resolve(pos);
+  if (
+    $pos.parent.type.name !== "objectField" ||
+    $pos.parent.attrs.fieldId !== CONTEXT_FIELD.id
+  )
+    return null;
+  const owner = $pos.depth > 1 ? $pos.node($pos.depth - 1) : null;
+  const type =
+    owner?.type.name === "objectBlock"
+      ? (owner.attrs.type as ObjectType)
+      : host.page?.type;
+  return type ? { from: $pos.start(), to: $pos.end(), type } : null;
+};
+
 const atItems = async (
   host: EditorHost,
   query: string,
-): Promise<MenuItem[]> => [
-  ...(await host.search(query)).map<MenuItem>((info) => ({
-    key: info.id,
-    badge: typeLabel(info.type),
-    label: info.title,
-    run: (editor, range) => insertRef(editor, range, info.id),
-  })),
-  ...(query
-    ? CREATABLE.map<MenuItem>((type) => ({
-        key: `new-${type}`,
-        badge: "＋",
-        label: `新規${typeLabel(type)}「${query}」`,
-        run: (editor, range) =>
-          insertRef(
-            editor,
-            range,
-            host.create(type, query, enclosingObjectId(editor, range.from)),
-          ),
-      }))
-    : []),
-];
+  editor: Editor,
+): Promise<MenuItem[]> => {
+  // Contextの行では、親になれる種別だけを出し、選んだら前の所属と入れ替える。
+  const context = contextFieldAt(editor, host, editor.state.selection.from);
+  const fits = (type: ObjectType): boolean =>
+    !context || canContain(roleOf(host, type), roleOf(host, context.type));
+  const put = (editor: Editor, range: Range, id: string): void =>
+    insertRef(editor, contextFieldAt(editor, host, range.from) ?? range, id);
+  return [
+    ...(await host.search(query))
+      .filter((info) => fits(info.type))
+      .map<MenuItem>((info) => ({
+        key: info.id,
+        badge: typeLabel(info.type),
+        label: info.title,
+        run: (editor, range) => put(editor, range, info.id),
+      })),
+    ...(query
+      ? CREATABLE.filter(fits).map<MenuItem>((type) => ({
+          key: `new-${type}`,
+          badge: "＋",
+          label: `新規${typeLabel(type)}「${query}」`,
+          run: (editor, range) =>
+            put(
+              editor,
+              range,
+              host.create(type, query, enclosingObjectId(editor, range.from)),
+            ),
+        }))
+      : []),
+  ];
+};
 
 /** 複数の行を選んで#を打った時に、本文にする範囲を覚えておく。 */
 const selectionBody = new PluginKey<{ title: number; end: number } | null>(
@@ -1219,7 +1255,7 @@ const createMenus = (
           ...common,
           char: "@",
           pluginKey: atMenu,
-          items: ({ query }) => atItems(host.current, query),
+          items: ({ query, editor }) => atItems(host.current, query, editor),
           render: render("参照・作成", atMenu),
         }),
         Suggestion<MenuItem, MenuItem>({
