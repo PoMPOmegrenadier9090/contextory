@@ -286,6 +286,23 @@ describe("ObjectStore", () => {
     expect(store.overview(0, 50).recent.map((o) => o.id)).not.toContain("x");
   });
 
+  it("lists objects without a parent in the inbox", () => {
+    const make = (id: string, type: string, parentId: string | null) =>
+      store.createObject({ id, type, title: id, parentId }, 60);
+    make("ia", "area", null);
+    make("ip", "project", null);
+    make("it", "task", "ip");
+    make("im", "memo", null);
+    make("person", "person", null);
+    make("gone", "project", null);
+    make("orphan", "task", "gone");
+    store.trashObject("gone", 61);
+    const inbox = store.overview(0).inbox.map((o) => o.id);
+    expect(inbox).toEqual(expect.arrayContaining(["ip", "im", "orphan"]));
+    for (const id of ["ia", "it", "person", "gone"])
+      expect(inbox).not.toContain(id);
+  });
+
   it("searches type names, titles and full Object and Daily text", () => {
     const token = "照合１００％";
     const body = paragraph(

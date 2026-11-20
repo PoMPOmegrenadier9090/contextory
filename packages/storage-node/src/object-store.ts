@@ -1756,6 +1756,12 @@ export class ObjectStore {
       navigation: select("type IN ('area', 'project') ORDER BY created_at"),
       recent,
       memos,
+      // Areaと具象は所属を持たないのが普通なので、未整理として扱わない。
+      inbox: select(
+        `NOT EXISTS (SELECT 1 FROM contexts c JOIN objects p ON p.id = c.target_id
+           WHERE c.object_id = objects.id AND p.deleted_at IS NULL)
+         ORDER BY created_at DESC`,
+      ).filter((o) => !["area", null].includes(this.role(o.type))),
     };
   }
 

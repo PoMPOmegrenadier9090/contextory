@@ -75,6 +75,21 @@ export const canContain = (
   return parent === null;
 };
 
+/** 種別の役割。組み込みの種別か、それを継いだ種別ならその名前。nullは具象。 */
+export const typeRole = (
+  type: ObjectType,
+  extendsOf: (type: ObjectType) => ObjectType | null | undefined,
+): ObjectType | null => {
+  const builtins: readonly string[] = OBJECT_TYPES;
+  const seen = new Set<string>();
+  for (let t: ObjectType | null | undefined = type; t && !seen.has(t);) {
+    if (builtins.includes(t)) return t;
+    seen.add(t);
+    t = extendsOf(t);
+  }
+  return null;
+};
+
 export const TYPE_COLORS = [
   "blue",
   "amber",

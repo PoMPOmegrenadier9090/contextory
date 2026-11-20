@@ -49,7 +49,7 @@ import {
   CONTEXT_FIELD,
   newId,
   normalizeObjectType,
-  OBJECT_TYPES,
+  typeRole,
   type DocNode,
   type ObjectType,
   type TypeDefinition,
@@ -909,17 +909,8 @@ const insertRef = (editor: Editor, range: Range, objectId: string): void => {
     .run();
 };
 
-/** 種別の役割。組み込みの種別か、それを継いだ種別ならその名前。nullは具象。 */
-const roleOf = (host: EditorHost, type: ObjectType): ObjectType | null => {
-  const builtins: readonly string[] = OBJECT_TYPES;
-  const seen = new Set<string>();
-  for (let t: ObjectType | null = type; t && !seen.has(t);) {
-    if (builtins.includes(t)) return t;
-    seen.add(t);
-    t = typeOf(host, t)?.extends ?? null;
-  }
-  return null;
-};
+const roleOf = (host: EditorHost, type: ObjectType): ObjectType | null =>
+  typeRole(type, (t) => typeOf(host, t)?.extends);
 
 /** posがContextの行の中なら、行の範囲と、所属を決めるObjectの種別。 */
 const contextFieldAt = (

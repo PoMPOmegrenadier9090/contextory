@@ -1,9 +1,12 @@
 import {
+  canContain,
+  CONTEXT_FIELD,
   DAILY_UNDATED_ID,
   inheritedContexts,
   isPageConflict,
   newId,
   TYPE_COLORS,
+  typeRole,
   type DocNode,
   type FieldDefinition,
   type ObjectClient,
@@ -15,6 +18,7 @@ import {
 } from "@pkm/core";
 import {
   CheckItem,
+  Chooser,
   DatePanel,
   formatDate,
   ObjectEditor,
@@ -321,6 +325,7 @@ export const ObjectApp = ({
     navigation: [],
     recent: [],
     memos: [],
+    inbox: [],
   });
   const [types, setAllTypes] = useState<readonly TypeDefinition[]>([]);
   const setTypes: typeof setAllTypes = (next) =>
@@ -371,6 +376,7 @@ export const ObjectApp = ({
       );
   };
   /** 開いているゴミ箱の中身。nullならゴミ箱を開いていない。 */
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [trashList, setTrashList] = useState<readonly ObjectSummary[] | null>(
     null,
   );
@@ -452,14 +458,16 @@ export const ObjectApp = ({
       client.overview(range.from, range.to),
       client.types(),
     ]);
-    setOverview(nextOverview);
+    // Inboxを知らない古いサーバーにつないでも、画面は落とさない。
+    const inbox =
+      (nextOverview.inbox as typeof nextOverview.inbox | undefined) ?? [];
+    setOverview({ ...nextOverview, inbox });
     setTypes(nextTypes);
     merge(
       Object.fromEntries(
-        [...nextOverview.navigation, ...nextOverview.recent].map((o) => [
-          o.id,
-          o,
-        ]),
+        [...nextOverview.navigation, ...nextOverview.recent, ...inbox].map(
+          (o) => [o.id, o],
+        ),
       ),
     );
   };
@@ -527,6 +535,7 @@ export const ObjectApp = ({
       setLoaded({ key: ++loads.current, hostId, doc: result.doc });
       setTypePage(null);
       setTrashList(null);
+      setInboxOpen(false);
       await refreshSide(hostId);
       window.scrollTo({ top: 0 });
     });
@@ -539,6 +548,7 @@ export const ObjectApp = ({
       // 文書は開き直した時に、新しい定義で組み立て直す。
       setLoaded(null);
       setTrashList(null);
+      setInboxOpen(false);
       setTypePage({ name, settings: false });
       window.scrollTo({ top: 0 });
     });
@@ -550,7 +560,34 @@ export const ObjectApp = ({
       setTrashList(await client.trash());
       setLoaded(null);
       setTypePage(null);
+      setInboxOpen(false);
       window.scrollTo({ top: 0 });
+    });
+  };
+  const openInbox = (): void => {
+    flush();
+    void enqueue(async () => {
+      setLoaded(null);
+      setTypePage(null);
+      setTrashList(null);
+      setInboxOpen(true);
+      await refreshSide(dailyHostId());
+      window.scrollTo({ top: 0 });
+    });
+  };
+  /** Inboxから所属を決める。決まったものは一覧から外れる。 */
+  const assignParent = (id: string, parentId: string): void => {
+    void enqueue(async () => {
+      merge({
+        [id]: await client.patchObject(id, {
+          fields: {
+            [CONTEXT_FIELD.id]: [
+              { type: "objectRef", attrs: { objectId: parentId } },
+            ],
+          },
+        }),
+      });
+      await refreshSide(dailyHostId());
     });
   };
   /** ゴミ箱での操作。済んだら一覧を読み直す。 */
@@ -786,6 +823,8 @@ export const ObjectApp = ({
     typeOf(type)?.checkbox ?? false;
   const colorOf = (type: ObjectType): string | undefined =>
     typeOf(type)?.color ?? undefined;
+  const roleOf = (type: ObjectType): ObjectType | null =>
+    typeRole(type, (t) => typeOf(t)?.extends);
   const viewProps = {
     client,
     types,
@@ -1177,6 +1216,16 @@ export const ObjectApp = ({
           >
             Daily
           </button>
+          <button
+            type="button"
+            aria-current={inboxOpen ? "page" : undefined}
+            onClick={go(openInbox)}
+          >
+            Inbox
+            {overview.inbox.length ? (
+              <span className="od-nav-count">{overview.inbox.length}</span>
+            ) : null}
+          </button>
           {areas.map((area) => (
             <div key={area.id}>
               {navButton(area, "od-nav-area")}
@@ -1221,7 +1270,69 @@ export const ObjectApp = ({
           </button>
         </nav>
         <main className="od-main">
-          {trashList ? (
+          {inboxOpen ? (
+            <>
+              <header className="od-page-header">
+                <span className="od-type">Inbox</span>
+                <h1>Inbox</h1>
+                <p className="od-page-meta">所属が決まっていないもの</p>
+              </header>
+              {overview.inbox.length ? (
+                <ul className="od-rows">
+                  {overview.inbox.map((object) => (
+                    <li key={object.id} className="od-row od-inbox-row">
+                      <span
+                        className="od-type"
+                        data-type={object.type}
+                        data-color={colorOf(object.type)}
+                      >
+                        {typeLabel(object.type)}
+                      </span>
+                      <button type="button" onClick={() => open(object.id)}>
+                        <strong>{object.title}</strong>
+                        <small>
+                          {new Intl.DateTimeFormat("ja-JP", {
+                            month: "numeric",
+                            day: "numeric",
+                          }).format(object.createdAt)}
+                        </small>
+                      </button>
+                      <Popover
+                        label="所属を選ぶ"
+                        ariaLabel={`${object.title}の所属を選ぶ`}
+                      >
+                        {(close) => (
+                          <Chooser
+                            placeholder="親にするObjectを探す"
+                            load={async (query) =>
+                              (await client.searchObjects(query, object.id))
+                                .filter((candidate) =>
+                                  canContain(
+                                    roleOf(candidate.type),
+                                    roleOf(object.type),
+                                  ),
+                                )
+                                .map((candidate) => ({
+                                  key: candidate.id,
+                                  label: candidate.title,
+                                  note: `#${typeLabel(candidate.type)}`,
+                                }))
+                            }
+                            onPick={(choice) => {
+                              close();
+                              assignParent(object.id, choice.key);
+                            }}
+                          />
+                        )}
+                      </Popover>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="od-empty">未整理のものはありません。</p>
+              )}
+            </>
+          ) : trashList ? (
             <>
               <header className="od-page-header">
                 <span className="od-type">ゴミ箱</span>

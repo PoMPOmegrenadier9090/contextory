@@ -29,6 +29,7 @@ export {
   OBJECT_TYPES,
   RELATED_FIELD,
   TYPE_COLORS,
+  typeRole,
 } from "./object-model.js";
 export type {
   FieldDefinition,
