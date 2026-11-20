@@ -1712,3 +1712,30 @@ html {
 .pe-editor .tiptap .od-embedded-view .od-timeline {
   padding: 0;
 }
+
+/* Inboxの「置き場所をなくしたもの」 */
+.od-section-heading {
+  margin: 32px 0 4px;
+  font-size: 15px;
+}
+
+.od-homeless-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.od-demo .od-homeless-actions button {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--od-surface);
+  border: 1px solid var(--od-line-strong);
+  border-radius: 7px;
+}
+
+@media (max-width: 760px) {
+  .od-homeless-actions {
+    grid-column: 1 / -1;
+  }
+}

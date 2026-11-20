@@ -680,3 +680,38 @@
 .pe-object [data-context-field] .pe-chip:is(:hover, :focus-visible) {
   background: color-mix(in srgb, var(--pe-type) 23%, transparent);
 }
+
+/* 窓を消したときなどに、下に出す通知。 */
+.pe-notice {
+  position: fixed;
+  z-index: 70;
+  bottom: 24px;
+  left: 50%;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  max-width: calc(100vw - 32px);
+  padding: 6px 6px 6px 14px;
+  color: #f6f4ee;
+  font-size: 14px;
+  background: #2f322d;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+  transform: translateX(-50%);
+}
+
+.pe-notice button {
+  padding: 4px 8px;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pe-notice button:hover {
+  background: rgb(255 255 255 / 12%);
+}

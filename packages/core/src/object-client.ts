@@ -17,6 +17,14 @@ export interface DayMemo {
   readonly hostTitle: string;
 }
 
+/** 書いた場所の窓が切り取りなどで外れ、まだどこにも貼られていないObject。 */
+export interface HomelessObject {
+  readonly object: ObjectSummary;
+  /** 最後の書いた場所。ゴミ箱にあるなどで開けなければnull */
+  readonly originId: string | null;
+  readonly originTitle: string;
+}
+
 export interface ObjectOverview {
   readonly navigation: readonly ObjectSummary[];
   readonly recent: readonly ObjectSummary[];
@@ -24,6 +32,8 @@ export interface ObjectOverview {
   readonly memos: readonly DayMemo[];
   /** 所属が決まっていないProject・Task・Memo・Decision。新しい順。 */
   readonly inbox: readonly ObjectSummary[];
+  /** 置き場所をなくしたObject。削除の候補として見せる。 */
+  readonly homeless: readonly HomelessObject[];
 }
 
 export interface ViewRow {
@@ -63,6 +73,8 @@ export interface ObjectPatch {
   readonly done?: boolean;
   /** FieldのIDごとの新しい値。Contextは参照の並びで渡す。 */
   readonly fields?: Readonly<Record<string, readonly DocNode[]>>;
+  /** nullなら書いた場所をなくし、置き場所をなくした印も外す（このまま残す）。 */
+  readonly origin?: null;
 }
 
 export interface ObjectTypePatch {

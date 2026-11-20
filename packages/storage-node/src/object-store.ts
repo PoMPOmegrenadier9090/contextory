@@ -46,7 +46,7 @@ import {
 
 import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 9;
+export const OBJECT_STORE_SCHEMA_VERSION = 10;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const isDocumentId = (id: string): boolean =>
@@ -77,6 +77,10 @@ interface ObjectRow {
   readonly updated_at: number;
   /** ゴミ箱へ移した日時。生きているObjectはnull */
   readonly deleted_at: number | null;
+  /** 書いた場所。ViewやDBから作ったものはnull */
+  readonly origin: string | null;
+  /** 1なら、書いた場所の窓が外れ、まだどこにも貼られていない。 */
+  readonly homeless: number;
 }
 
 interface MentionRow {
@@ -91,6 +95,11 @@ interface MentionRow {
 
 const nodes = (json: string): readonly DocNode[] =>
   JSON.parse(json) as readonly DocNode[];
+
+// shortcut: 複数の場所に置かれていたObjectは、どこで書いたか分からないので
+// IDの小さい場所を書いた場所にする。困る例が出たら、作成時刻の近い場所を選ぶ。
+const ORIGIN_FROM_PLACEMENTS = `UPDATE objects SET origin =
+  (SELECT MIN(host_id) FROM placements WHERE object_id = objects.id)`;
 
 // ゴミ箱のObjectは、配下を集める経路に含めない。
 const REACH = `WITH RECURSIVE reach(id) AS (
@@ -268,6 +277,15 @@ export class ObjectStore {
         }
         this.database.pragma("user_version = 9");
       })();
+    if (version < 10)
+      this.database.transaction(() => {
+        this.database.exec(`
+          ALTER TABLE objects ADD COLUMN origin TEXT;
+          ALTER TABLE objects ADD COLUMN homeless INTEGER NOT NULL DEFAULT 0;
+          ${ORIGIN_FROM_PLACEMENTS};
+        `);
+        this.database.pragma("user_version = 10");
+      })();
   }
 
   close(): void {
@@ -335,6 +353,7 @@ export class ObjectStore {
       done: row.done === 1,
       contexts: this.contextsOf(row.id),
       createdAt: row.created_at,
+      origin: row.origin,
     };
   }
 
@@ -782,13 +801,19 @@ export class ObjectStore {
     const revision = createHash("sha256")
       .update(JSON.stringify(doc))
       .digest("base64url");
-    return { doc, objects, revision };
+    return {
+      doc,
+      ...(host ? { title: nodes(host.title) } : {}),
+      objects,
+      revision,
+    };
   }
 
   /**
    * 編集した文書木を保存する。Object単位へ分け、初めて現れたObjectは
-   * 置かれた場所からContextを継承して作る。この文書から外れ、ほかのどこにも
-   * 置かれていないObjectはゴミ箱へ移す。
+   * 置かれた場所からContextを継承し、そこを書いた場所にして作る。
+   * 外れたObjectはゴミ箱へ送らない。書いた場所から外れたものには、
+   * 置き場所をなくした印を付ける。ゴミ箱へ送るのは、エディタが削除と判断したときだけ。
    */
   savePage(
     hostId: string,
@@ -831,6 +856,10 @@ export class ObjectStore {
           Boolean(content.attrs.done),
           now,
         );
+        if (before === undefined)
+          this.database
+            .prepare("UPDATE objects SET origin = ? WHERE id = ?")
+            .run(split.parents[id] ?? hostId, id);
         if (before !== undefined && before !== type) this.revalidate(id, now);
         // 文書木がContextの行を持つなら、後でその内容を正とする。
         const explicit = content.fields?.some(
@@ -866,21 +895,33 @@ export class ObjectStore {
       this.reindex(hostId, now);
       for (const id of saved) this.reindex(id, now);
 
-      // 外れてほかのどこにも置かれていないObjectは、ゴミ箱へ移す。
-      // 取り消しや貼り付けで戻れば、上のupsertObjectがゴミ箱から戻す。
-      const removed = previous.filter((id) => !saved.has(id));
-      const placedElsewhere = this.database.prepare(
-        `SELECT 1 FROM placements WHERE object_id = ?
-         AND host_id NOT IN (SELECT value FROM json_each(?))`,
+      const placedIn = this.database.prepare(
+        "SELECT 1 FROM placements WHERE host_id = ? AND object_id = ?",
       );
-      const removedJson = JSON.stringify(removed);
-      for (const id of removed)
-        if (!placedElsewhere.get(id, removedJson))
-          this.database
-            .prepare(
-              "UPDATE objects SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
-            )
-            .run(now, id);
+      const wasPlaced = new Set(previous);
+      const reindexed = new Set([hostId, ...saved]);
+      const setOrigin = this.database.prepare(
+        "UPDATE objects SET origin = ?, homeless = 0 WHERE id = ?",
+      );
+      for (const id of saved) {
+        const row = this.row(id)!;
+        // 置き場所をなくしたObjectが貼られたら、そこを新しい書いた場所にする。
+        // 同じ文書の中で書いた場所の窓を動かしたときも、移った先を書いた場所にする。
+        if (
+          (row.homeless === 1 && !wasPlaced.has(id)) ||
+          (row.origin !== null &&
+            reindexed.has(row.origin) &&
+            !placedIn.get(row.origin, id))
+        )
+          setOrigin.run(split.parents[id] ?? hostId, id);
+      }
+      // 書いた場所の窓が外れたObjectは、切り取っただけかもしれないので印だけ付ける。
+      const markHomeless = this.database.prepare(
+        `UPDATE objects SET homeless = 1 WHERE id = ? AND origin IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM placements p
+           WHERE p.host_id = objects.origin AND p.object_id = objects.id)`,
+      );
+      for (const id of previous) if (!saved.has(id)) markHomeless.run(id);
     })();
     return this.loadPage(hostId);
   }
@@ -946,6 +987,12 @@ export class ObjectStore {
           value,
         })),
       );
+      if (patch.origin === null)
+        this.database
+          .prepare(
+            "UPDATE objects SET origin = NULL, homeless = 0 WHERE id = ?",
+          )
+          .run(id);
       if (type !== row.type) this.revalidate(id, now);
       if (type !== row.type)
         // 新しい種別に無いFieldの値は消す。
@@ -994,11 +1041,16 @@ export class ObjectStore {
     return this.summary(this.trashedRow(id));
   }
 
-  /** ゴミ箱から戻す。置き場所の無いObjectとして戻る。 */
+  /**
+   * ゴミ箱から戻す。置き場所の無いObjectとして戻る。書いた場所があれば、
+   * 元の場所に戻せるよう、置き場所をなくしたものとして見せる。
+   */
   restoreObject(id: string): ObjectSummary {
     this.trashedRow(id);
     this.database
-      .prepare("UPDATE objects SET deleted_at = NULL WHERE id = ?")
+      .prepare(
+        "UPDATE objects SET deleted_at = NULL, homeless = origin IS NOT NULL WHERE id = ?",
+      )
       .run(id);
     return this.getObject(id);
   }
@@ -1763,8 +1815,24 @@ export class ObjectStore {
         hostTitle: host ? this.summary(host).title : placed ? "Daily" : "",
       });
     }
+    const homeless = (
+      this.database
+        .prepare(
+          "SELECT * FROM objects WHERE deleted_at IS NULL AND homeless = 1 ORDER BY updated_at DESC",
+        )
+        .all() as ObjectRow[]
+    ).map((row) => {
+      const origin = row.origin === null ? undefined : this.row(row.origin);
+      const live = origin !== undefined || isDocumentId(row.origin ?? "");
+      return {
+        object: this.summary(row),
+        originId: live ? row.origin : null,
+        originTitle: origin ? this.summary(origin).title : live ? "Daily" : "",
+      };
+    });
     return {
       navigation: select("type IN ('area', 'project') ORDER BY created_at"),
+      homeless,
       recent,
       memos,
       // Areaと具象は所属を持たないのが普通なので、未整理として扱わない。
@@ -1912,6 +1980,7 @@ export class ObjectStore {
         this.reindex(object.id, now);
       }
       for (const id of Object.keys(workspace.documents)) this.reindex(id, now);
+      this.database.exec(ORIGIN_FROM_PLACEMENTS);
     })();
   }
 }
