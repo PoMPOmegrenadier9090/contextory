@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ObjectPage, TypeDefinition, ViewResult } from "@pkm/core";
+import type {
+  ObjectPage,
+  ObjectSummary,
+  TypeDefinition,
+  ViewResult,
+} from "@pkm/core";
 import { ObjectStore } from "@pkm/storage-node";
 import { BACKUP_KEEP, rotateBackup } from "./backups.js";
 import { openServerApp } from "./http-api.js";
@@ -28,6 +33,61 @@ afterEach(async () => {
 });
 
 describe("object API", () => {
+  it("accepts explicit contexts and confirmation without activity", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
+    directories.push(parent);
+    const app = await open(parent);
+    for (const [id, type] of [
+      ["project", "project"],
+      ["person", "Person"],
+    ])
+      await app.inject({
+        method: "POST",
+        url: "/api/next/objects",
+        payload: { id, type },
+      });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/next/objects",
+      payload: {
+        id: "note",
+        type: "memo",
+        parentId: "person",
+        contextId: "project",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json<ObjectSummary>()).toMatchObject({
+      contexts: ["project"],
+      noActivity: false,
+    });
+    const page = (
+      await app.inject({ url: "/api/next/pages/note" })
+    ).json<ObjectPage>();
+    expect(
+      page.doc.content?.find((node) => node.attrs?.fieldId === "related")
+        ?.content,
+    ).toContainEqual({ type: "objectRef", attrs: { objectId: "person" } });
+    const confirmed = await app.inject({
+      method: "PATCH",
+      url: "/api/next/objects/note",
+      payload: { noActivity: true, fields: { context: [] } },
+    });
+    expect(confirmed.json<ObjectSummary>()).toMatchObject({
+      contexts: [],
+      noActivity: true,
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/next/objects",
+          payload: { id: "invalid", type: "memo", contextId: 1 },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+
   it("returns workspace search results from the API", async () => {
     const parent = await mkdtemp(join(tmpdir(), "pkms-object-api-"));
     directories.push(parent);

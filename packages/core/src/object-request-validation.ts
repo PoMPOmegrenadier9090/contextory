@@ -48,6 +48,7 @@ export const parseObjectCreate = (
   type: ObjectRecord["type"];
   title: string;
   parentId: string | null;
+  contextId?: string | null;
 } => {
   const body = requireRequestRecord(value);
   const parentId = body.parentId ?? null;
@@ -57,6 +58,14 @@ export const parseObjectCreate = (
     title: typeof body.title === "string" ? body.title : "",
     parentId:
       parentId === null ? null : requireRequestString(parentId, "parentId"),
+    ...(body.contextId === undefined
+      ? {}
+      : {
+          contextId:
+            body.contextId === null
+              ? null
+              : requireRequestString(body.contextId, "contextId"),
+        }),
   };
 };
 
@@ -65,6 +74,9 @@ export const parseObjectPatch = (value: unknown): ObjectPatch => {
   return {
     ...(typeof body.title === "string" ? { title: body.title } : {}),
     ...(typeof body.done === "boolean" ? { done: body.done } : {}),
+    ...(typeof body.noActivity === "boolean"
+      ? { noActivity: body.noActivity }
+      : {}),
     ...(body.type === undefined ? {} : { type: requireType(body.type) }),
     ...(body.origin === null ? { origin: null } : {}),
     ...(body.fields === undefined

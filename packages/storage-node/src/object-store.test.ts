@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   normalizeObjectType,
+  parseView,
   type DocNode,
   type ObjectRecord,
 } from "@pkm/core";
@@ -237,11 +238,12 @@ describe("ObjectStore", () => {
 
     store.savePage(DAILY, doc(block("binned", "task", "捨てた")), 13);
     store.trashObject("binned", 14);
-    // ゴミ箱から戻したものは、元の場所に戻せるよう候補に出す。
+    // ゴミ箱から戻すと、書いた場所の窓も戻る。
     store.restoreObject("binned");
-    expect(store.overview(0).homeless.map((h) => h.object.id)).toEqual([
+    expect(store.overview(0).homeless).toEqual([]);
+    expect(body(store.loadPage(DAILY).doc).content?.[0]?.attrs?.objectId).toBe(
       "binned",
-    ]);
+    );
   });
 
   it("opens an object page with its title for embedding elsewhere", () => {
@@ -690,6 +692,21 @@ describe("ObjectStore", () => {
     expect(views).toMatchObject([
       { scope: "type", layout: "table" },
       { scope: "object", layout: "timeline", reach: "all" },
+      {
+        scope: "object",
+        name: "Task",
+        layout: "table",
+        type: "task",
+        reach: "all",
+        done: "open",
+      },
+      {
+        scope: "object",
+        name: "Memo",
+        layout: "timeline",
+        type: "memo",
+        reach: "all",
+      },
     ]);
     expect(
       store
@@ -978,6 +995,450 @@ describe("ObjectStore", () => {
     expect(ids("person")).toContain("memoB");
   });
 
+  it("uses an explicit creation context and keeps an entity parent as a reference", () => {
+    store.createObject(
+      { id: "person", type: "Person", title: "人", parentId: null },
+      10,
+    );
+    const make = (id: string, parentId: string, contextId?: string | null) =>
+      store.createObject(
+        {
+          id,
+          type: "memo",
+          title: id,
+          parentId,
+          ...(contextId === undefined ? {} : { contextId }),
+        },
+        11,
+      );
+    expect(make("explicit", "person", "task").contexts).toEqual(["task"]);
+    expect(related("explicit")).toEqual(["person"]);
+    expect(store.timeline("person")).toContainEqual(
+      expect.objectContaining({
+        kind: "object",
+        object: store.getObject("explicit"),
+      }),
+    );
+    expect(make("override", "project", "other").contexts).toEqual(["other"]);
+    expect(make("invalid", "project", "person").contexts).toEqual([]);
+    expect(make("missing", "project", "missing").contexts).toEqual([]);
+    expect(make("inherited", "project", null).contexts).toEqual(["project"]);
+    expect(make("unspecified", "project").contexts).toEqual(["project"]);
+    expect(
+      store.createObject(
+        {
+          id: "entity",
+          type: "Person",
+          title: "具象",
+          parentId: null,
+          contextId: "project",
+        },
+        12,
+      ).contexts,
+    ).toEqual([]);
+  });
+
+  it("keeps objects confirmed without activity out of the inbox until assigned", () => {
+    const inbox = () => store.overview(0).inbox.map((object) => object.id);
+    expect(store.getObject("memo").noActivity).toBe(false);
+    expect(store.patchObject("memo", { noActivity: true }, 10).noActivity).toBe(
+      true,
+    );
+    expect(inbox()).not.toContain("memo");
+    store.patchObject("memo", { title: "残す" }, 11);
+    expect(store.getObject("memo").noActivity).toBe(true);
+    store.patchObject("memo", { noActivity: false }, 12);
+    expect(inbox()).toContain("memo");
+    store.patchObject(
+      "memo",
+      { noActivity: true, fields: { context: [ref("project")] } },
+      13,
+    );
+    expect(store.getObject("memo").noActivity).toBe(false);
+    store.removeContext("memo", "project");
+    store.patchObject("memo", { noActivity: true }, 14);
+    store.addContext("memo", "project");
+    expect(store.getObject("memo").noActivity).toBe(false);
+    store.removeContext("memo", "project");
+    store.patchObject("memo", { noActivity: true }, 15);
+    store.savePage("memo", doc(field("context", ref("task"))), 16);
+    expect(store.getObject("memo").noActivity).toBe(false);
+  });
+
+  it("loads the entire context chain for breadcrumbs", () => {
+    store.createObject(
+      { id: "sub", type: "task", title: "子", parentId: "task" },
+      10,
+    );
+    store.createObject(
+      { id: "note", type: "memo", title: "メモ", parentId: "sub" },
+      11,
+    );
+    const page = store.loadPage("note");
+    expect(Object.keys(page.objects).sort()).toEqual([
+      "area",
+      "note",
+      "project",
+      "sub",
+      "task",
+    ]);
+    expect(page.objects.area?.title).toBe("area");
+  });
+
+  it("returns timeline activities and their titles for both layouts of entry", () => {
+    const view = store.types().find((type) => type.name === "project")!
+      .views[1]!;
+    const result = store.queryView(view.id, "project", "2026-11-12");
+    expect(result.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "object",
+          object: store.getObject("task"),
+          activity: "project",
+        }),
+        expect.objectContaining({
+          kind: "object",
+          object: store.getObject("memo"),
+          activity: null,
+        }),
+        expect.objectContaining({
+          kind: "unit",
+          hostId: "other",
+          activity: "other",
+        }),
+        expect.objectContaining({
+          kind: "unit",
+          hostId: DAILY,
+          activity: null,
+        }),
+      ]),
+    );
+    expect(result.objects.project?.title).toBe("project");
+    expect(result.objects.other?.title).toBe("other");
+    store.createObject(
+      { id: "person", type: "Person", title: "人", parentId: null },
+      10,
+    );
+    store.savePage(
+      "task",
+      doc(
+        block(
+          "decision",
+          "decision",
+          "判断",
+          paragraph("mention", ref("person")),
+        ),
+      ),
+      11,
+    );
+    expect(store.timeline("person")).toContainEqual(
+      expect.objectContaining({
+        kind: "unit",
+        hostId: "decision",
+        activity: "task",
+      }),
+    );
+    const typeView = store.types().find((type) => type.name === "task")!
+      .views[0]!;
+    store.updateType("task", { views: [{ ...typeView, layout: "timeline" }] });
+    const typed = store.queryView(typeView.id, null, "2026-11-12");
+    expect(typed.entries[0]).toMatchObject({ activity: "project" });
+    expect(typed.objects.project?.title).toBe("project");
+  });
+
+  it.each(["table", "timeline"] as const)(
+    "collects referenced entities in an activity's %s view",
+    (layout) => {
+      store.savePage(
+        DAILY,
+        doc(
+          ...["a", "b", "c", "outside", "gone", "fromTrash"].map((id) =>
+            block(id, "Company", id),
+          ),
+        ),
+        10,
+      );
+      store.updateType("project", {
+        fields: [{ id: "company", name: "企業", kind: "reference" }],
+      });
+      store.patchObject(
+        "project",
+        { fields: { company: [ref("a")], related: [ref("b")] } },
+        11,
+      );
+      store.savePage(
+        "task",
+        doc(paragraph("mention", ref("c"), ref("c"), ref("gone"))),
+        12,
+      );
+      store.savePage("other", doc(paragraph("outside", ref("outside"))), 13);
+      store.savePage(
+        "project",
+        doc(
+          block(
+            "trashedSource",
+            "memo",
+            "メモ",
+            paragraph("ref", ref("fromTrash")),
+          ),
+        ),
+        14,
+      );
+      store.trashObject("trashedSource", 15);
+      store.trashObject("gone", 16);
+      const view = parseView({
+        id: "companies",
+        scope: "object",
+        name: "企業",
+        layout,
+        type: "Company",
+        reach: "direct",
+      });
+      store.updateType("project", { views: [view] });
+      const result = store.queryView(view.id, "project", "2026-11-12");
+      const ids =
+        layout === "table"
+          ? result.rows.map((row) => row.object.id)
+          : result.entries.flatMap((entry) =>
+              entry.kind === "object" ? [entry.object.id] : [],
+            );
+      expect(ids.sort()).toEqual(["a", "b", "c"]);
+      for (const id of ids) expect(store.getObject(id).contexts).toEqual([]);
+      store.updateType("project", {
+        views: [
+          {
+            ...view,
+            filters: [{ fieldId: "related", presence: "set", values: [] }],
+          },
+        ],
+      });
+      const filtered = store.queryView(view.id, "project", "2026-11-12");
+      expect(filtered.rows).toEqual([]);
+      expect(filtered.entries).toEqual([]);
+    },
+  );
+
+  it("adds Task and Memo views to every built-in activity type", () => {
+    for (const name of ["area", "project", "task"]) {
+      const views = store.types().find((type) => type.name === name)!.views;
+      expect(views.map((view) => view.name)).toEqual([
+        "すべて",
+        "Timeline",
+        "Task",
+        "Memo",
+      ]);
+      expect(views[2]).toMatchObject({
+        scope: "object",
+        layout: "table",
+        type: "task",
+        reach: "all",
+        done: "open",
+      });
+      expect(views[3]).toMatchObject({
+        scope: "object",
+        layout: "timeline",
+        type: "memo",
+        reach: "all",
+      });
+    }
+    expect(
+      store.types().find((type) => type.name === "memo")!.views,
+    ).toHaveLength(2);
+    const views = store.types().find((type) => type.name === "project")!.views;
+    expect(
+      store
+        .queryView(views[2]!.id, "project", "2026-11-12")
+        .rows.map((row) => row.object.id),
+    ).toEqual(["task"]);
+    store.patchObject("task", { done: true }, 10);
+    expect(store.queryView(views[2]!.id, "project", "2026-11-12").rows).toEqual(
+      [],
+    );
+  });
+
+  it("revalidates contexts and references for a changed type and its derived types", () => {
+    store.createObject(
+      { id: "work", type: "Work", title: "活動", parentId: null },
+      10,
+    );
+    store.createObject(
+      { id: "derived", type: "Derived", title: "継承", parentId: null },
+      11,
+    );
+    store.updateType("Work", { extends: "project" });
+    store.updateType("Derived", { extends: "Work" });
+    store.addContext("work", "area");
+    store.addContext("derived", "project");
+    store.createObject(
+      { id: "child", type: "memo", title: "子", parentId: "work" },
+      12,
+    );
+    store.createObject(
+      {
+        id: "trashed",
+        type: "Derived",
+        title: "削除済み",
+        parentId: "project",
+      },
+      13,
+    );
+    store.trashObject("trashed", 14);
+    store.updateType("Work", { extends: null });
+    for (const id of ["work", "derived", "child"])
+      expect(store.getObject(id).contexts).toEqual([]);
+    expect(related("work")).toEqual(["area"]);
+    expect(related("derived")).toEqual(["project"]);
+    expect(related("child")).toEqual(["work"]);
+    expect(
+      store.trash().find((object) => object.id === "trashed")?.contexts,
+    ).toEqual([]);
+    expect(store.timeline("project")).toContainEqual(
+      expect.objectContaining({
+        kind: "object",
+        object: store.getObject("derived"),
+      }),
+    );
+  });
+
+  it("restores all windows with their attributes and sibling/container positions", () => {
+    const first = block("lost", "memo", "メモ");
+    const second = {
+      ...first,
+      attrs: { ...first.attrs, id: "second", collapsed: false },
+    };
+    const tree = doc(
+      paragraph("before", text("前")),
+      {
+        type: "bulletList",
+        attrs: { id: "list" },
+        content: [
+          {
+            type: "listItem",
+            attrs: { id: "item" },
+            content: [
+              paragraph("lead", text("項目")),
+              first,
+              paragraph("tail", text("後")),
+            ],
+          },
+        ],
+      },
+      second,
+      paragraph("after", text("末尾")),
+    );
+    store.savePage(DAILY, tree, 10);
+    const expected = store.loadPage(DAILY).doc;
+    store.savePage("project", doc(first), 11);
+    const project = store.loadPage("project").doc;
+    store.trashObject("lost", 12);
+    expect(store.loadPage(DAILY).objects.lost).toBeUndefined();
+    store.restoreObject("lost");
+    expect(store.loadPage(DAILY).doc).toEqual(expected);
+    expect(store.loadPage("project").doc).toEqual(project);
+    expect(store.overview(0).homeless).toEqual([]);
+  });
+
+  it("restores other hosts once when a save undoes trashing a window", () => {
+    const tree = doc(block("lost", "memo", "メモ"));
+    store.savePage(DAILY, tree, 10);
+    store.savePage("project", tree, 11);
+    store.trashObject("lost", 12);
+    store.savePage("project", tree, 13);
+    for (const host of [DAILY, "project"])
+      expect(body(store.loadPage(host).doc).content).toHaveLength(1);
+    expect(store.getObject("lost").origin).toBe(DAILY);
+    expect(store.overview(0).homeless).toEqual([]);
+    store.savePage(DAILY, doc(), 14);
+    store.trashObject("lost", 15);
+    store.restoreObject("lost");
+    expect(body(store.loadPage(DAILY).doc).content).toEqual([]);
+    expect(store.overview(0).homeless.map((entry) => entry.object.id)).toEqual([
+      "lost",
+    ]);
+  });
+
+  it("restores every window even when block ids are absent", () => {
+    const window: DocNode = {
+      type: "objectEmbed",
+      attrs: { objectId: "memo", collapsed: true },
+    };
+    store.savePage(DAILY, doc(window, window), 10);
+    const before = store.loadPage(DAILY).doc;
+    store.trashObject("memo", 11);
+    store.restoreObject("memo");
+    expect(store.loadPage(DAILY).doc).toEqual(before);
+  });
+
+  it("appends windows when their recorded sibling or container is gone", () => {
+    const tree = doc(
+      paragraph("before", text("前")),
+      block("lost", "memo", "メモ"),
+    );
+    store.savePage(DAILY, tree, 10);
+    store.savePage(
+      "project",
+      doc({
+        type: "blockquote",
+        attrs: { id: "container" },
+        content: [block("lost", "memo", "メモ")],
+      }),
+      11,
+    );
+    store.trashObject("lost", 12);
+    for (const host of [DAILY, "project"])
+      store.savePage(host, doc(paragraph("replacement", text("残す"))), 13);
+    store.restoreObject("lost");
+    for (const host of [DAILY, "project"])
+      expect(
+        body(store.loadPage(host).doc).content?.map((node) => node.type),
+      ).toEqual(["paragraph", "objectBlock"]);
+  });
+
+  it("restores a trashed object placed as an unexpanded window", () => {
+    const tree = doc(block("lost", "memo", "メモ"));
+    store.savePage(DAILY, tree, 10);
+    store.savePage("project", tree, 11);
+    store.trashObject("lost", 12);
+    const page = store.savePage(
+      DAILY,
+      doc({
+        type: "objectEmbed",
+        attrs: { id: "b-lost", objectId: "lost", collapsed: true },
+      }),
+      13,
+    );
+    expect(page.objects.lost?.title).toBe("メモ");
+    expect(body(page.doc).content).toHaveLength(1);
+    expect(body(store.loadPage("project").doc).content).toHaveLength(1);
+    expect(store.overview(0).homeless).toEqual([]);
+  });
+
+  it("skips trashed or purged hosts and clears records on purge", () => {
+    const tree = doc(block("lost", "memo", "メモ"));
+    store.savePage("project", tree, 10);
+    store.savePage("other", tree, 11);
+    store.trashObject("lost", 12);
+    store.trashObject("project", 13);
+    store.trashObject("other", 14);
+    store.purgeObject("other");
+    store.restoreObject("lost");
+    expect(store.overview(0).homeless.map((entry) => entry.object.id)).toEqual([
+      "lost",
+    ]);
+    store.restoreObject("project");
+    expect(body(store.loadPage("project").doc).content).toEqual([]);
+    store.savePage(DAILY, tree, 15);
+    store.trashObject("lost", 16);
+    store.purgeObject("lost");
+    store.createObject(
+      { id: "lost", type: "memo", title: "別のメモ", parentId: null },
+      17,
+    );
+    store.trashObject("lost", 18);
+    store.restoreObject("lost");
+    expect(body(store.loadPage(DAILY).doc).content).toEqual([]);
+  });
+
   it("migrates multiple contexts to one parent and references", () => {
     const dir = mkdtempSync(join(tmpdir(), "pkm-store-"));
     try {
@@ -1004,6 +1465,8 @@ describe("ObjectStore", () => {
           ('memo', 'person', 0), ('memo', 'project', 1), ('note', 'person', 0);
         ALTER TABLE objects DROP COLUMN origin;
         ALTER TABLE objects DROP COLUMN homeless;
+        ALTER TABLE objects DROP COLUMN no_activity;
+        DROP TABLE removed_windows;
         PRAGMA user_version = 7;
       `);
       raw.close();
@@ -1042,6 +1505,8 @@ describe("ObjectStore", () => {
       raw.exec(`
         ALTER TABLE objects DROP COLUMN origin;
         ALTER TABLE objects DROP COLUMN homeless;
+        ALTER TABLE objects DROP COLUMN no_activity;
+        DROP TABLE removed_windows;
         PRAGMA user_version = 9;
       `);
       raw.close();
@@ -1049,6 +1514,95 @@ describe("ObjectStore", () => {
       expect(migrated.getObject("placed").origin).toBe(DAILY);
       expect(migrated.getObject("loose").origin).toBeNull();
       migrated.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates v10 views without duplicating custom filters and persists v11 state", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pkm-store-"));
+    try {
+      const path = join(dir, "objects.sqlite");
+      const old = new ObjectStore(path);
+      old.createObject(
+        { id: "note", type: "memo", title: "残す", parentId: null },
+        10,
+      );
+      for (const name of ["area", "project", "task"]) {
+        const views = old
+          .types()
+          .find((type) => type.name === name)!
+          .views.slice(0, 2);
+        if (name === "project")
+          views.push(
+            parseView({
+              id: "custom-task",
+              scope: "object",
+              name: "独自Task",
+              type: "task",
+              done: "done",
+            }),
+          );
+        if (name === "task")
+          views.push(
+            parseView({
+              id: "custom-memo",
+              scope: "object",
+              name: "独自Memo",
+              type: "memo",
+              layout: "table",
+            }),
+          );
+        old.updateType(name, { views });
+      }
+      old.close();
+      const raw = new Database(path);
+      raw.exec(
+        "ALTER TABLE objects DROP COLUMN no_activity; DROP TABLE removed_windows; PRAGMA user_version = 10;",
+      );
+      raw.close();
+      const migrated = new ObjectStore(path);
+      expect(migrated.getObject("note").noActivity).toBe(false);
+      for (const name of ["area", "project", "task"]) {
+        const views = migrated
+          .types()
+          .find((type) => type.name === name)!.views;
+        expect(views).toHaveLength(4);
+        for (const type of ["task", "memo"])
+          expect(
+            views.filter(
+              (view) => view.scope === "object" && view.type === type,
+            ),
+          ).toHaveLength(1);
+      }
+      expect(
+        migrated.types().find((type) => type.name === "project")!.views[2],
+      ).toMatchObject({ id: "custom-task", done: "done" });
+      expect(
+        migrated.types().find((type) => type.name === "task")!.views[2],
+      ).toMatchObject({ id: "custom-memo", layout: "table" });
+      migrated.patchObject("note", { noActivity: true }, 11);
+      migrated.savePage(DAILY, doc(block("placed", "task", "戻す")), 12);
+      migrated.trashObject("placed", 13);
+      migrated.close();
+      const reopened = new ObjectStore(path);
+      expect(reopened.getObject("note").noActivity).toBe(true);
+      expect(reopened.overview(0).inbox).toEqual([]);
+      reopened.restoreObject("placed");
+      expect(
+        body(reopened.loadPage(DAILY).doc).content?.[0]?.attrs?.objectId,
+      ).toBe("placed");
+      expect(reopened.overview(0).homeless).toEqual([]);
+      expect(
+        reopened.types().find((type) => type.name === "area")!.views,
+      ).toHaveLength(4);
+      reopened.close();
+      const verified = new Database(path);
+      expect(verified.pragma("user_version", { simple: true })).toBe(11);
+      expect(
+        verified.prepare("SELECT count(*) FROM removed_windows").pluck().get(),
+      ).toBe(0);
+      verified.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

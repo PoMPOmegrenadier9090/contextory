@@ -71,6 +71,8 @@ export interface ObjectPatch {
   /** 種別を変える。新しい種別に無いFieldの値は消える。 */
   readonly type?: string;
   readonly done?: boolean;
+  /** 活動なしで確定し、Inboxから外す。 */
+  readonly noActivity?: boolean;
   /** FieldのIDごとの新しい値。Contextは参照の並びで渡す。 */
   readonly fields?: Readonly<Record<string, readonly DocNode[]>>;
   /** nullなら書いた場所をなくし、置き場所をなくした印も外す（このまま残す）。 */
@@ -108,6 +110,7 @@ export interface ObjectClient {
     readonly type: ObjectType;
     readonly title: string;
     readonly parentId: string | null;
+    readonly contextId?: string | null;
   }): Promise<ObjectSummary>;
   patchObject(id: string, patch: ObjectPatch): Promise<ObjectSummary>;
   /** anchorIdは開いているObject。todayは日付の条件に使う、画面側の今日。 */
@@ -118,7 +121,7 @@ export interface ObjectClient {
   ): Promise<ViewResult>;
   /** ゴミ箱へ移す。置かれている文書の本文からは外れる。 */
   trashObject(id: string): Promise<ObjectSummary>;
-  /** ゴミ箱から戻す。置き場所の無いObjectとして戻る。 */
+  /** ゴミ箱から戻し、残っている書いた場所や窓も復元する。 */
   restoreObject(id: string): Promise<ObjectSummary>;
   /** ゴミ箱にあるObjectを完全に削除する。 */
   purgeObject(id: string): Promise<void>;

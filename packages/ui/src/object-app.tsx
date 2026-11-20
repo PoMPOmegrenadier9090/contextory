@@ -381,6 +381,17 @@ export const ObjectApp = ({
   };
   /** 開いているゴミ箱の中身。nullならゴミ箱を開いていない。 */
   const [inboxOpen, setInboxOpen] = useState(false);
+  /** 画面の下に出す、ボタン付きの通知。 */
+  const [notice, setNotice] = useState<{
+    readonly text: string;
+    readonly label: string;
+    readonly run: () => void;
+  } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   /** 開いている活動。具象のページで書くものの所属に使う。 */
   const [activity, setActivity] = useState<string | null>(null);
   const [trashList, setTrashList] = useState<readonly ObjectSummary[] | null>(
@@ -773,16 +784,33 @@ export const ObjectApp = ({
       create: (type, title, parentId) => {
         const id = newId();
         const parent = parentId ?? (page && !isDaily(page) ? page : null);
+        // 具象の中で作ったものは、開いている活動を所属にする。
+        const parentObject = parent ? objects[parent] : undefined;
+        const contextId =
+          parentObject && isEntity(parentObject.type) ? activity : undefined;
         mutate(
-          () => client.createObject({ id, type, title, parentId: parent }),
+          () =>
+            client.createObject({
+              id,
+              type,
+              title,
+              parentId: parent,
+              ...(contextId !== undefined ? { contextId } : {}),
+            }),
           {
             id,
             type,
             title,
             done: false,
-            contexts: inheritedContexts(parent ? objects[parent] : undefined),
+            contexts:
+              contextId !== undefined
+                ? contextId
+                  ? [contextId]
+                  : []
+                : inheritedContexts(parentObject),
             createdAt: Date.now(),
             origin: null,
+            noActivity: false,
           },
         );
         return id;
@@ -849,6 +877,10 @@ export const ObjectApp = ({
     const memo = captureMemo(input);
     if (!memo) return;
     const daily = dailyHostId();
+    // Objectのページで書いたら、そのページの本文にも置けるようにする。
+    const from = page !== null && !isDaily(page) ? page : null;
+    const fromTitle = from ? (objects[from]?.title ?? "無題") : "";
+    const memoId = String(memo.attrs?.objectId);
     flush();
     setCapture(null);
     void enqueue(async () => {
@@ -867,6 +899,12 @@ export const ObjectApp = ({
             setLoaded({ key: ++loads.current, hostId: daily, doc: result.doc });
           }
           if (page !== null) await refreshSide(page);
+          if (from)
+            setNotice({
+              text: "今日のDailyにMemoを足しました",
+              label: `「${fromTitle}」の本文にも追加`,
+              run: () => appendWindow(from, memoId),
+            });
           return;
         } catch (error) {
           if (isPageConflict(error) && attempt < 2) continue;
@@ -874,6 +912,33 @@ export const ObjectApp = ({
           showCapture(input);
           throw error;
         }
+      }
+    });
+  };
+
+  /** hostIdの本文の末尾に、Objectの窓を足す。開いていれば読み直す。 */
+  const appendWindow = (hostId: string, objectId: string): void => {
+    flush();
+    void enqueue(async () => {
+      const [latest, embedded] = await Promise.all([
+        client.loadPage(hostId),
+        client.loadPage(objectId),
+      ]);
+      const result = await client.savePage(
+        hostId,
+        {
+          ...latest.doc,
+          content: [
+            ...(latest.doc.content ?? []),
+            objectBlockOf(objectId, embedded),
+          ],
+        },
+        latest.revision,
+      );
+      merge(result.objects);
+      if (pageRef.current === hostId) {
+        revision.current = { hostId, value: result.revision };
+        setLoaded({ key: ++loads.current, hostId, doc: result.doc });
       }
     });
   };
@@ -889,6 +954,20 @@ export const ObjectApp = ({
   const isActivity = (type: ObjectType): boolean =>
     ACTIVITY_TYPES.includes(roleOf(type) ?? "");
   const isEntity = (type: ObjectType): boolean => roleOf(type) === null;
+  /** 所属をたどった祖先。上から順に並ぶ。 */
+  const ancestorsOf = (object: ObjectSummary): ObjectSummary[] => {
+    const chain: ObjectSummary[] = [];
+    const seen = new Set([object.id]);
+    for (
+      let parent = objects[object.contexts[0] ?? ""];
+      parent && !seen.has(parent.id);
+      parent = objects[parent.contexts[0] ?? ""]
+    ) {
+      seen.add(parent.id);
+      chain.unshift(parent);
+    }
+    return chain;
+  };
   const viewProps = {
     client,
     types,
@@ -901,6 +980,7 @@ export const ObjectApp = ({
     trash: trashObject,
     shared,
     share,
+    activity,
   };
   // この日のDailyに置いたMemoは本文で読めるので、欄には出さない。
   const dayMemos = overview.memos.filter((memo) => memo.hostId !== page);
@@ -925,6 +1005,7 @@ export const ObjectApp = ({
       contexts: [],
       createdAt: Date.now(),
       origin: null,
+      noActivity: false,
     };
     mutate(
       () =>
@@ -950,6 +1031,17 @@ export const ObjectApp = ({
     if (narrow()) setMenuOpen(false);
     task();
   };
+  const typeButton = (definition: TypeDefinition): React.JSX.Element => (
+    <button
+      key={definition.name}
+      type="button"
+      className="od-nav-project"
+      aria-current={typePage?.name === definition.name ? "page" : undefined}
+      onClick={go(() => openType(definition.name))}
+    >
+      #{typeLabel(definition.name)}
+    </button>
+  );
   const navButton = (
     object: ObjectSummary,
     className: string,
@@ -1333,22 +1425,18 @@ export const ObjectApp = ({
             )
             .map((project) => navButton(project, "od-nav-project"))}
           <p className="od-nav-heading">種別</p>
-          {types.map((definition) => (
-            <button
-              key={definition.name}
-              type="button"
-              className="od-nav-project"
-              aria-current={
-                typePage?.name === definition.name ? "page" : undefined
-              }
-              onClick={go(() => openType(definition.name))}
-            >
-              #{typeLabel(definition.name)}
-            </button>
-          ))}
+          {types
+            .filter((definition) => !isEntity(definition.name))
+            .map((definition) => typeButton(definition))}
+          {types.some((definition) => isEntity(definition.name)) ? (
+            <p className="od-nav-heading">具象</p>
+          ) : null}
+          {types
+            .filter((definition) => isEntity(definition.name))
+            .map((definition) => typeButton(definition))}
           <button
             type="button"
-            className="od-nav-project"
+            className="od-nav-project od-nav-trash"
             aria-current={trashList ? "page" : undefined}
             onClick={go(openTrash)}
           >
@@ -1390,34 +1478,54 @@ export const ObjectApp = ({
                           }).format(object.createdAt)}
                         </small>
                       </button>
-                      <Popover
-                        label="所属を選ぶ"
-                        ariaLabel={`${object.title}の所属を選ぶ`}
-                      >
-                        {(close) => (
-                          <Chooser
-                            placeholder="親にするObjectを探す"
-                            load={async (query) =>
-                              (await client.searchObjects(query, object.id))
-                                .filter((candidate) =>
-                                  canContain(
-                                    roleOf(candidate.type),
-                                    roleOf(object.type),
-                                  ),
-                                )
-                                .map((candidate) => ({
-                                  key: candidate.id,
-                                  label: candidate.title,
-                                  note: `#${typeLabel(candidate.type)}`,
-                                }))
-                            }
-                            onPick={(choice) => {
-                              close();
-                              assignParent(object.id, choice.key);
-                            }}
-                          />
-                        )}
-                      </Popover>
+                      <div className="od-homeless-actions">
+                        <Popover
+                          label="所属を選ぶ"
+                          ariaLabel={`${object.title}の所属を選ぶ`}
+                        >
+                          {(close) => (
+                            <Chooser
+                              placeholder="親にするObjectを探す"
+                              load={async (query) =>
+                                (await client.searchObjects(query, object.id))
+                                  .filter((candidate) =>
+                                    canContain(
+                                      roleOf(candidate.type),
+                                      roleOf(object.type),
+                                    ),
+                                  )
+                                  .map((candidate) => ({
+                                    key: candidate.id,
+                                    label: candidate.title,
+                                    note: `#${typeLabel(candidate.type)}`,
+                                  }))
+                              }
+                              onPick={(choice) => {
+                                close();
+                                assignParent(object.id, choice.key);
+                              }}
+                            />
+                          )}
+                        </Popover>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void enqueue(async () => {
+                              merge({
+                                [object.id]: await client.patchObject(
+                                  object.id,
+                                  {
+                                    noActivity: true,
+                                  },
+                                ),
+                              });
+                              await refreshSide(dailyHostId());
+                            })
+                          }
+                        >
+                          活動なしで確定
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -1637,6 +1745,69 @@ export const ObjectApp = ({
                       );
                     }}
                   />
+                  {!isEntity(current.type) &&
+                  roleOf(current.type) !== "area" ? (
+                    <nav className="od-crumbs" aria-label="所属">
+                      {ancestorsOf(current).map((ancestor) => (
+                        <span key={ancestor.id}>
+                          <button
+                            type="button"
+                            onClick={() => open(ancestor.id)}
+                          >
+                            {ancestor.title}
+                          </button>
+                          ›
+                        </span>
+                      ))}
+                      <Popover
+                        label={
+                          current.contexts.length
+                            ? "所属を変える"
+                            : "所属を選ぶ"
+                        }
+                        ariaLabel={`${current.title}の所属を変える`}
+                      >
+                        {(close) => (
+                          <Chooser
+                            placeholder="親にするObjectを探す"
+                            load={async (query) => {
+                              const found = (
+                                await client.searchObjects(query, current.id)
+                              ).filter((candidate) =>
+                                canContain(
+                                  roleOf(candidate.type),
+                                  roleOf(current.type),
+                                ),
+                              );
+                              merge(
+                                Object.fromEntries(found.map((o) => [o.id, o])),
+                              );
+                              return found.map((candidate) => ({
+                                key: candidate.id,
+                                label: candidate.title,
+                                note: `#${typeLabel(candidate.type)}`,
+                              }));
+                            }}
+                            onPick={(choice) => {
+                              close();
+                              act(() =>
+                                client.patchObject(current.id, {
+                                  fields: {
+                                    [CONTEXT_FIELD.id]: [
+                                      {
+                                        type: "objectRef",
+                                        attrs: { objectId: choice.key },
+                                      },
+                                    ],
+                                  },
+                                }),
+                              );
+                            }}
+                          />
+                        )}
+                      </Popover>
+                    </nav>
+                  ) : null}
                   {isEntity(current.type) ? (
                     <div className="od-activity">
                       {activity ? (
@@ -1872,6 +2043,61 @@ export const ObjectApp = ({
           )}
         </main>
       </div>
+      <nav className="od-bottombar" aria-label="よく使う操作">
+        <button
+          type="button"
+          aria-current={page !== null && isDaily(page) ? "page" : undefined}
+          onClick={() => open(dailyHostId())}
+        >
+          Daily
+        </button>
+        <button
+          type="button"
+          aria-current={inboxOpen ? "page" : undefined}
+          onClick={openInbox}
+        >
+          Inbox
+          {overview.inbox.length + overview.homeless.length ? (
+            <span className="od-nav-count">
+              {overview.inbox.length + overview.homeless.length}
+            </span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            document
+              .querySelector<HTMLButtonElement>(".od-search-trigger")
+              ?.click()
+          }
+        >
+          検索
+        </button>
+        <button type="button" aria-label="Memoを書く" onClick={startCapture}>
+          ＋
+        </button>
+      </nav>
+      {notice ? (
+        <div className="pe-notice od-notice" role="status">
+          <span>{notice.text}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setNotice(null);
+              notice.run();
+            }}
+          >
+            {notice.label}
+          </button>
+          <button
+            type="button"
+            aria-label="通知を閉じる"
+            onClick={() => setNotice(null)}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
     </div>
   );
   return (
