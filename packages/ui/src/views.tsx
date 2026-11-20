@@ -2,6 +2,7 @@ import {
   CONTEXT_FIELD,
   newId,
   refIds,
+  typeRole,
   type DocNode,
   type FieldDefinition,
   type ObjectClient,
@@ -102,6 +103,8 @@ export interface ViewTabsProps {
   /** 端末をまたいで共有する画面の状態（前回開いたView、畳んだ行）。 */
   readonly shared: Readonly<Record<string, unknown>>;
   readonly share: (key: string, value: unknown) => void;
+  /** 開いている活動。具象のページで作るObjectの所属に使う。 */
+  readonly activity?: string | null;
 }
 
 export const EmbeddedViewContext = createContext<Omit<
@@ -150,8 +153,17 @@ export const ViewTabs = ({
   trash,
   shared,
   share,
+  activity = null,
   embeddedViewId,
 }: ViewTabsProps & { readonly embeddedViewId?: string }): React.JSX.Element => {
+  /** 開いているObjectが具象なら、Timelineを活動ごとに分け、作るものは活動に属させる。 */
+  const anchorType = anchorId ? lookup(anchorId)?.type : undefined;
+  const inEntity =
+    anchorType !== undefined &&
+    typeRole(
+      anchorType,
+      (t) => types.find((definition) => definition.name === t)?.extends,
+    ) === null;
   const views = owner.views.filter((candidate) => candidate.scope === scope);
   /** 前回開いていたView。種別とページの範囲ごとに覚える。 */
   const selectedKey = embeddedViewId
@@ -1243,6 +1255,7 @@ export const ViewTabs = ({
                         type: type.name,
                         title,
                         parentId: anchorId,
+                        ...(inEntity ? { contextId: activity } : {}),
                       });
                       if (Object.keys(initial).length)
                         await client.patchObject(id, { fields: initial });
@@ -1338,14 +1351,18 @@ export const ViewTabs = ({
       day: "numeric",
       weekday: "short",
     }).format(new Date(time));
-  const timeline = (entries: readonly ObjectTimelineEntry[]) => {
+  /** 日付の見出しを挟んで並べる。 */
+  const byDay = (
+    entries: readonly ObjectTimelineEntry[],
+    prefix = "",
+  ): React.JSX.Element[] => {
     const items: React.JSX.Element[] = [];
     let last = "";
     for (const entry of entries) {
       const day = dayLabel(entry.time);
       if (day !== last)
         items.push(
-          <li key={`day-${day}`} className="od-day">
+          <li key={`day-${prefix}${day}`} className="od-day">
             {day}
           </li>,
         );
@@ -1353,6 +1370,25 @@ export const ViewTabs = ({
       items.push(entryRow(entry));
     }
     return items;
+  };
+  const timeline = (entries: readonly ObjectTimelineEntry[]) => {
+    if (!inEntity) return byDay(entries);
+    // 具象のページでは活動ごとに分け、活動に属さないものは最後にまとめる。
+    const groups = new Map<string, ObjectTimelineEntry[]>();
+    for (const entry of entries) {
+      const key = entry.activity ?? "";
+      groups.set(key, [...(groups.get(key) ?? []), entry]);
+    }
+    return [...groups.keys()]
+      .sort((a, b) => Number(a === "") - Number(b === ""))
+      .flatMap((key) => [
+        <li key={`activity-${key}`} className="od-activity-group">
+          {key
+            ? (data?.objects[key]?.title ?? lookup(key)?.title ?? "…")
+            : "活動なし"}
+        </li>,
+        ...byDay(groups.get(key)!, `${key}-`),
+      ]);
   };
 
   return (

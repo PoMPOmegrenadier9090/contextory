@@ -4,6 +4,7 @@ import {
   parseObjectCreate,
   parseObjectOverviewRange,
   parseObjectPageSave,
+  parseObjectPatch,
   parseObjectTypePatch,
 } from "./object-request-validation.js";
 
@@ -48,5 +49,23 @@ describe("Object request validation", () => {
         fields: [{ id: "x", name: "期限", kind: null }],
       }),
     ).toThrow();
+  });
+
+  it("accepts explicit creation contexts and the no-activity flag", () => {
+    for (const contextId of ["project", null])
+      expect(
+        parseObjectCreate({ id: "x", type: "memo", contextId }).contextId,
+      ).toBe(contextId);
+    for (const contextId of ["", 1, {}, false])
+      expect(() =>
+        parseObjectCreate({ id: "x", type: "memo", contextId }),
+      ).toThrow(TypeError);
+    expect(parseObjectPatch({ noActivity: true })).toEqual({
+      noActivity: true,
+    });
+    expect(parseObjectPatch({ noActivity: false })).toEqual({
+      noActivity: false,
+    });
+    expect(parseObjectPatch({ noActivity: "true" })).toEqual({});
   });
 });

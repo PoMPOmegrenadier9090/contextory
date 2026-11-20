@@ -87,6 +87,8 @@ export interface EditorObject {
   readonly title: string;
   /** 書いた場所。ここにある窓を消すとゴミ箱へ移す。 */
   readonly origin?: string | null;
+  /** 所属 */
+  readonly contexts?: readonly string[];
 }
 
 /** エディタが外側（Objectの保存先）へ頼む操作。 */
@@ -917,6 +919,8 @@ interface MenuItem {
   readonly badge: string;
   readonly label: string;
   readonly run: (editor: Editor, range: Range) => void;
+  /** Shift+Enterで、参照の代わりに窓として埋め込む。 */
+  readonly embed?: (editor: Editor, range: Range) => void;
 }
 
 interface MenuState {
@@ -982,6 +986,7 @@ const atItems = async (
   host: EditorHost,
   query: string,
   editor: Editor,
+  notify: (text: string) => void,
 ): Promise<MenuItem[]> => {
   // Contextの行では、親になれる種別だけを出し、選んだら前の所属と入れ替える。
   const context = contextFieldAt(editor, host, editor.state.selection.from);
@@ -989,6 +994,12 @@ const atItems = async (
     !context || canContain(roleOf(host, type), roleOf(host, context.type));
   const put = (editor: Editor, range: Range, id: string): void =>
     insertRef(editor, contextFieldAt(editor, host, range.from) ?? range, id);
+  // 本文の段落でだけ、埋め込みも選べる。同じ文書に二つ窓があると上書きし合う。
+  const { $from } = editor.state.selection;
+  const placed =
+    host.load && host.hostId !== null && $from.parent.type.name === "paragraph"
+      ? objectIdsIn(editor.state.doc)
+      : null;
   return [
     ...(await host.search(query))
       .filter((info) => fits(info.type))
@@ -997,6 +1008,24 @@ const atItems = async (
         badge: typeLabel(info.type),
         label: info.title,
         run: (editor, range) => put(editor, range, info.id),
+        ...(placed &&
+        !placed.has(info.id) &&
+        info.id !== host.hostId &&
+        info.id !== host.page?.id
+          ? {
+              embed: (editor: Editor, range: Range) => {
+                editor.chain().focus().deleteRange(range).run();
+                embedExisting(
+                  editor,
+                  host,
+                  afterBlock(editor, range.from, null),
+                  info.id,
+                  info.title,
+                  notify,
+                );
+              },
+            }
+          : {}),
       })),
     ...(query
       ? CREATABLE.filter(fits).map<MenuItem>((type) => ({
@@ -1258,6 +1287,7 @@ const hashItems = (host: EditorHost, query: string): MenuItem[] => {
 const createMenus = (
   bridge: MenuBridge,
   host: RefObject<EditorHost>,
+  notify: (text: string) => void,
 ): Extension =>
   Extension.create({
     name: "objectMenus",
@@ -1306,8 +1336,9 @@ const createMenus = (
           ...common,
           char: "@",
           pluginKey: atMenu,
-          items: ({ query, editor }) => atItems(host.current, query, editor),
-          render: render("参照・作成", atMenu),
+          items: ({ query, editor }) =>
+            atItems(host.current, query, editor, notify),
+          render: render("参照・作成（Shift+Enterで埋め込み）", atMenu),
         }),
         Suggestion<MenuItem, MenuItem>({
           ...common,
@@ -1351,6 +1382,73 @@ interface BlockMenu {
 }
 
 /** 右クリックや「⋯」で出すメニュー。選んでいる文字、Object、場所に合わせて並べる。 */
+/** 既存のObjectを読み込んでから、atへ窓として埋め込む。 */
+const embedExisting = (
+  editor: Editor,
+  host: EditorHost,
+  after: number,
+  id: string,
+  label: string,
+  notify: (text: string) => void,
+): void => {
+  if (!host.load) return;
+  void host.load(id).then(
+    (block) => {
+      if (editor.isDestroyed) return;
+      const at = Math.min(after, editor.state.doc.content.size);
+      const around = new Set([
+        host.hostId,
+        host.page?.id,
+        ...objectsAround(editor.state.doc.resolve(at)),
+      ]);
+      // 自分の配下に自分を埋め込むと、窓が循環する。
+      if (containsObject(block, around))
+        return notify(`「${label}」は、この場所を中に含むので埋め込めません`);
+      editor
+        .chain()
+        .focus()
+        .command(({ tr }) => {
+          tr.setMeta("embedExisting", true);
+          return true;
+        })
+        .insertContentAt(at, block as JSONContent)
+        .run();
+    },
+    (error: unknown) =>
+      notify(
+        `埋め込めませんでした: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+  );
+};
+
+/** Objectの窓のContextの行を、targetIdだけにする。 */
+const setContextIn = (
+  editor: Editor | null,
+  objectId: string,
+  targetId: string,
+): void => {
+  if (!editor || editor.isDestroyed) return;
+  let range: Range | null = null;
+  editor.state.doc.descendants((node, pos) => {
+    if (range) return false;
+    if (node.type.name !== "objectBlock" || node.attrs.objectId !== objectId)
+      return true;
+    node.forEach((child, offset) => {
+      if (
+        !range &&
+        child.type.name === "objectField" &&
+        child.attrs.fieldId === CONTEXT_FIELD.id
+      )
+        range = {
+          from: pos + 2 + offset,
+          to: pos + offset + child.nodeSize,
+        };
+    });
+    return false;
+  });
+  if (range) insertRef(editor, range, targetId);
+};
+
 const blockItems = (
   editor: Editor,
   host: EditorHost,
@@ -1512,31 +1610,7 @@ const blockItems = (
             }));
         },
         onPick: (choice) =>
-          void load(choice.key).then(
-            (block) => {
-              if (editor.isDestroyed) return;
-              const at = Math.min(after, editor.state.doc.content.size);
-              const around = new Set([
-                host.hostId,
-                host.page?.id,
-                ...objectsAround(editor.state.doc.resolve(at)),
-              ]);
-              // 自分の配下に自分を埋め込むと、窓が循環する。
-              if (containsObject(block, around))
-                return notify(
-                  `「${choice.label}」は、この場所を中に含むので埋め込めません`,
-                );
-              editor
-                .chain()
-                .focus()
-                .insertContentAt(at, block as JSONContent)
-                .run();
-            },
-            (error: unknown) =>
-              notify(
-                `埋め込めませんでした: ${error instanceof Error ? error.message : String(error)}`,
-              ),
-          ),
+          embedExisting(editor, host, after, choice.key, choice.label, notify),
       },
     });
   }
@@ -1735,6 +1809,8 @@ export const ObjectEditor = ({
   const [notice, setNotice] = useState<{
     readonly text: string;
     readonly undo: boolean;
+    /** 通知から選べる操作。所属を置いた場所にするときなど。 */
+    readonly action?: { readonly label: string; readonly run: () => void };
   } | null>(null);
   /** 「元に戻す」で戻す窓。位置は以後の編集に合わせて動かす。 */
   const removedRef = useRef<RemovedWindow[]>([]);
@@ -1818,6 +1894,44 @@ export const ObjectEditor = ({
       undo: !tr.getMeta("unwrapObject"),
     });
   };
+  /**
+   * 既存のObjectを貼り付けや埋め込みで置いたら、所属もこの場所にするかを尋ねる。
+   * 置いた場所と所属は独立しているので、自動では変えない。
+   */
+  const onAdded = (tr: Transaction): void => {
+    const event: unknown = tr.getMeta("uiEvent");
+    if (event !== "paste" && event !== "drop" && !tr.getMeta("embedExisting"))
+      return;
+    const current = hostRef.current;
+    const before = objectIdsIn(tr.before);
+    let found: { readonly id: string; readonly pos: number } | null = null;
+    tr.doc.descendants((node, pos) => {
+      if (found || node.type.name !== "objectBlock") return !found;
+      const id = String(node.attrs.objectId);
+      if (before.has(id)) return true;
+      if (current.lookup(id)) found = { id, pos };
+      return false;
+    });
+    if (!found) return;
+    const { id, pos } = found;
+    const object = current.lookup(id)!;
+    const target = startAt(tr.doc.resolve(pos), current).context[0];
+    const parent = target ? current.lookup(target) : undefined;
+    if (
+      !parent ||
+      object.contexts?.[0] === parent.id ||
+      !canContain(roleOf(current, parent.type), roleOf(current, object.type))
+    )
+      return;
+    setNotice({
+      text: `「${object.title || "無題"}」をここに置きました`,
+      undo: false,
+      action: {
+        label: `所属を「${parent.title || "無題"}」にする`,
+        run: () => setContextIn(editorRef.current, id, parent.id),
+      },
+    });
+  };
   /** 消した窓を元の位置へ戻す。ゴミ箱へ移したObjectは、保存で戻る。 */
   const undoRemoved = (): void => {
     const items = removedRef.current;
@@ -1838,8 +1952,8 @@ export const ObjectEditor = ({
       })
       .run();
   };
-  const latest = useRef({ host, onChange, onRemoved });
-  latest.current = { host, onChange, onRemoved };
+  const latest = useRef({ host, onChange, onRemoved, onAdded });
+  latest.current = { host, onChange, onRemoved, onAdded };
   const hostRef = useRef(host);
   hostRef.current = host;
   // キー入力は描画を待たずに届くので、メニューの最新状態はrefにも持つ。
@@ -1867,6 +1981,11 @@ export const ObjectEditor = ({
           select(
             (index + (event.key === "ArrowDown" ? 1 : -1) + count) % count,
           );
+          return true;
+        }
+        const chosen = current.items[Math.min(index, count - 1)];
+        if (event.key === "Enter" && event.shiftKey && chosen?.embed) {
+          current.pick({ ...chosen, run: chosen.embed });
           return true;
         }
         if (event.key === "Enter" || event.key === "Tab") {
@@ -1899,7 +2018,7 @@ export const ObjectEditor = ({
       CollapsedGuard,
       SelectionBody,
       createTags(hostRef),
-      createMenus(bridge, hostRef),
+      createMenus(bridge, hostRef, (text) => setNotice({ text, undo: false })),
     ],
     content: initialDoc as JSONContent,
     editorProps: {
@@ -1921,6 +2040,7 @@ export const ObjectEditor = ({
       // 保存の列に削除より先に本文を並べるため、ゴミ箱へ送る前に知らせる。
       latest.current.onChange(updated.getJSON() as DocNode);
       latest.current.onRemoved(transaction);
+      latest.current.onAdded(transaction);
     },
   });
 
@@ -2049,6 +2169,17 @@ export const ObjectEditor = ({
           {notice.undo ? (
             <button type="button" onClick={undoRemoved}>
               元に戻す
+            </button>
+          ) : null}
+          {notice.action ? (
+            <button
+              type="button"
+              onClick={() => {
+                setNotice(null);
+                notice.action?.run();
+              }}
+            >
+              {notice.action.label}
             </button>
           ) : null}
           <button

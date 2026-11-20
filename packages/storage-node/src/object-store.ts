@@ -46,7 +46,7 @@ import {
 
 import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 10;
+export const OBJECT_STORE_SCHEMA_VERSION = 11;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const isDocumentId = (id: string): boolean =>
@@ -81,6 +81,7 @@ interface ObjectRow {
   readonly origin: string | null;
   /** 1なら、書いた場所の窓が外れ、まだどこにも貼られていない。 */
   readonly homeless: number;
+  readonly no_activity: number;
 }
 
 interface MentionRow {
@@ -107,19 +108,6 @@ const REACH = `WITH RECURSIVE reach(id) AS (
   SELECT c.object_id FROM contexts c JOIN reach r ON c.target_id = r.id
   JOIN objects o ON o.id = c.object_id AND o.deleted_at IS NULL
 )`;
-
-/** 本文から、idのObjectの埋め込みを取り除く。 */
-const withoutEmbed = (body: readonly DocNode[], id: string): DocNode[] =>
-  body
-    .filter(
-      (node) =>
-        node.type !== "objectEmbed" || String(node.attrs?.objectId) !== id,
-    )
-    .map((node) =>
-      node.content
-        ? { ...node, content: withoutEmbed(node.content, id) }
-        : node,
-    );
 
 /**
  * 次期のObject保存層。objects・documents・contextsが正本で、
@@ -243,7 +231,7 @@ export class ObjectStore {
           .prepare("SELECT name FROM types")
           .pluck()
           .all() as string[])
-          this.setViews(name, this.defaultViews());
+          this.setViews(name, this.defaultViews(name));
         this.database.pragma("user_version = 5");
       })();
     if (version < 6)
@@ -285,6 +273,34 @@ export class ObjectStore {
           ${ORIGIN_FROM_PLACEMENTS};
         `);
         this.database.pragma("user_version = 10");
+      })();
+    if (version < 11)
+      this.database.transaction(() => {
+        this.database.exec(`
+          ALTER TABLE objects ADD COLUMN no_activity INTEGER NOT NULL DEFAULT 0;
+          CREATE TABLE removed_windows (
+            id INTEGER PRIMARY KEY,
+            object_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            node TEXT NOT NULL,
+            previous_id TEXT,
+            parent_id TEXT
+          );
+          CREATE INDEX removed_windows_object ON removed_windows(object_id);
+        `);
+        for (const type of ACTIVITY_TYPES) {
+          const views = this.viewsOf(type);
+          const additions = this.defaultViews(type)
+            .slice(2)
+            .filter(
+              (view) =>
+                !views.some(
+                  (v) => v.scope === "object" && v.type === view.type,
+                ),
+            );
+          if (additions.length) this.setViews(type, [...views, ...additions]);
+        }
+        this.database.pragma("user_version = 11");
       })();
   }
 
@@ -354,6 +370,7 @@ export class ObjectStore {
       contexts: this.contextsOf(row.id),
       createdAt: row.created_at,
       origin: row.origin,
+      noActivity: row.no_activity === 1,
     };
   }
 
@@ -445,11 +462,11 @@ export class ObjectStore {
         "INSERT OR IGNORE INTO types (name, checkbox, created_at) VALUES (?, ?, ?)",
       )
       .run(name, name === "task" ? 1 : 0, now).changes;
-    if (created) this.setViews(name, this.defaultViews());
+    if (created) this.setViews(name, this.defaultViews(name));
   }
 
   /** 種別を作ったときに持たせるView。種別のページの表と、ObjectのページのTimeline。 */
-  private defaultViews(): ViewDefinition[] {
+  private defaultViews(type: ObjectType): ViewDefinition[] {
     return [
       parseView({ id: newId(), scope: "type", name: "すべて" }),
       parseView({
@@ -459,6 +476,26 @@ export class ObjectStore {
         layout: "timeline",
         reach: "all",
       }),
+      ...(ACTIVITY_TYPES.includes(type)
+        ? [
+            parseView({
+              id: newId(),
+              scope: "object",
+              name: "Task",
+              type: "task",
+              reach: "all",
+              done: "open",
+            }),
+            parseView({
+              id: newId(),
+              scope: "object",
+              name: "Memo",
+              layout: "timeline",
+              type: "memo",
+              reach: "all",
+            }),
+          ]
+        : []),
     ];
   }
 
@@ -685,6 +722,14 @@ export class ObjectStore {
       "INSERT OR IGNORE INTO contexts (object_id, target_id, position) VALUES (?, ?, ?)",
     );
     contexts.forEach((target, position) => insert.run(id, target, position));
+    const row = contexts.length
+      ? (this.database.prepare("SELECT * FROM objects WHERE id = ?").get(id) as
+          ObjectRow | undefined)
+      : undefined;
+    if (row?.no_activity === 1)
+      this.database
+        .prepare("UPDATE objects SET no_activity = 0 WHERE id = ?")
+        .run(id);
   }
 
   /** hostの本文から、配置と言及の索引を作り直す。 */
@@ -747,6 +792,7 @@ export class ObjectStore {
       "DELETE FROM placements WHERE host_id = ?",
       "DELETE FROM mentions WHERE host_id = ?",
       "DELETE FROM field_values WHERE object_id = ?",
+      "DELETE FROM removed_windows WHERE object_id = ? OR host_id = ?",
     ])
       this.database.prepare(sql).run(...(sql.includes("OR") ? [id, id] : [id]));
   }
@@ -791,7 +837,7 @@ export class ObjectStore {
     };
     // 文書内のObject、参照先、それらのContext先まで含める。
     for (const id of ids)
-      for (const context of include(id)?.contexts ?? []) include(context);
+      for (const context of include(id)?.contexts ?? []) ids.add(context);
     const doc = joinDocument(
       { type: "doc", content: [...hostFields, ...body] },
       contents,
@@ -835,6 +881,7 @@ export class ObjectStore {
       const split = splitDocument(doc);
       const previous = this.placedIds(hostId);
       const saved = new Set<string>();
+      const restored = new Set<string>();
       const ensure = (id: string): void => {
         const content = split.objects[id];
         if (!content || saved.has(id)) return;
@@ -844,9 +891,9 @@ export class ObjectStore {
         if (parentId !== null && parentId !== hostId) ensure(parentId);
         // ゴミ箱にあったObjectは、文書に置いたことで戻す。Contextはそのまま。
         const before = this.database
-          .prepare("SELECT type FROM objects WHERE id = ?")
-          .pluck()
-          .get(id) as string | undefined;
+          .prepare("SELECT type, deleted_at FROM objects WHERE id = ?")
+          .get(id) as { type: string; deleted_at: number | null } | undefined;
+        if (before?.deleted_at != null) restored.add(id);
         const type = normalizeObjectType(content.attrs.type) ?? "task";
         this.upsertObject(
           id,
@@ -860,7 +907,8 @@ export class ObjectStore {
           this.database
             .prepare("UPDATE objects SET origin = ? WHERE id = ?")
             .run(split.parents[id] ?? hostId, id);
-        if (before !== undefined && before !== type) this.revalidate(id, now);
+        if (before !== undefined && before.type !== type)
+          this.revalidate(id, now);
         // 文書木がContextの行を持つなら、後でその内容を正とする。
         const explicit = content.fields?.some(
           (field) => field.id === CONTEXT_FIELD.id,
@@ -875,6 +923,16 @@ export class ObjectStore {
         }
       };
       for (const id of Object.keys(split.objects)) ensure(id);
+      const bringBack = this.database.prepare(
+        "UPDATE objects SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL",
+      );
+      for (const id of [
+        ...embeddedIds(split.host.content ?? []),
+        ...Object.values(split.objects).flatMap((object) =>
+          embeddedIds(object.body),
+        ),
+      ])
+        if (bringBack.run(id).changes) restored.add(id);
       // 参照先が同じ保存で作られることがあるので、Fieldは全件を作ってから保存する。
       for (const id of saved)
         this.saveFields(id, split.objects[id]?.fields ?? []);
@@ -894,6 +952,7 @@ export class ObjectStore {
           .run(hostId, body, now);
       this.reindex(hostId, now);
       for (const id of saved) this.reindex(id, now);
+      for (const id of restored) this.restoreWindows(id, now, hostId);
 
       const placedIn = this.database.prepare(
         "SELECT 1 FROM placements WHERE host_id = ? AND object_id = ?",
@@ -939,6 +998,7 @@ export class ObjectStore {
       readonly type: ObjectType;
       readonly title: string;
       readonly parentId: string | null;
+      readonly contextId?: string | null;
     },
     now: number,
   ): ObjectSummary {
@@ -956,9 +1016,18 @@ export class ObjectStore {
       );
       this.assignContexts(
         input.id,
-        inheritedContexts(parent && this.summary(parent)),
-        this.isEntity(parent),
+        typeof input.contextId === "string"
+          ? [input.contextId]
+          : inheritedContexts(parent && this.summary(parent)),
+        false,
       );
+      if (this.isEntity(parent))
+        this.assignContexts(
+          input.id,
+          [...this.contextsOf(input.id), parent!.id],
+          true,
+        );
+      this.reindex(input.id, now);
     })();
     return this.getObject(input.id);
   }
@@ -979,6 +1048,10 @@ export class ObjectStore {
         patch.done ?? row.done === 1,
         now,
       );
+      if (patch.noActivity !== undefined)
+        this.database
+          .prepare("UPDATE objects SET no_activity = ? WHERE id = ?")
+          .run(patch.noActivity ? 1 : 0, id);
       this.saveFields(
         id,
         Object.entries(patch.fields ?? {}).map(([fieldId, value]) => ({
@@ -1014,6 +1087,10 @@ export class ObjectStore {
   trashObject(id: string, now: number): ObjectSummary {
     this.database.transaction(() => {
       this.requireRow(id);
+      const remember = this.database.prepare(
+        `INSERT INTO removed_windows (object_id, host_id, node, previous_id, parent_id)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
       for (const hostId of this.database
         .prepare("SELECT host_id FROM placements WHERE object_id = ?")
         .pluck()
@@ -1024,12 +1101,45 @@ export class ObjectStore {
           .prepare(`SELECT body FROM ${table} WHERE id = ?`)
           .pluck()
           .get(hostId) as string | undefined;
-        if (body !== undefined)
+        if (body !== undefined) {
+          const remove = (
+            list: readonly DocNode[],
+            parentId: string | null,
+          ): DocNode[] =>
+            list.flatMap((node, index) => {
+              if (
+                node.type === "objectEmbed" &&
+                String(node.attrs?.objectId) === id
+              ) {
+                const previous = list[index - 1]?.attrs?.id;
+                remember.run(
+                  id,
+                  hostId,
+                  JSON.stringify(node),
+                  typeof previous === "string" ? previous : null,
+                  parentId,
+                );
+                return [];
+              }
+              const container = node.attrs?.id;
+              return [
+                node.content
+                  ? {
+                      ...node,
+                      content: remove(
+                        node.content,
+                        typeof container === "string" ? container : null,
+                      ),
+                    }
+                  : node,
+              ];
+            });
           this.database
             .prepare(
               `UPDATE ${table} SET body = ?, updated_at = ? WHERE id = ?`,
             )
-            .run(JSON.stringify(withoutEmbed(nodes(body), id)), now, hostId);
+            .run(JSON.stringify(remove(nodes(body), null)), now, hostId);
+        }
         this.database
           .prepare("DELETE FROM placements WHERE host_id = ? AND object_id = ?")
           .run(hostId, id);
@@ -1041,17 +1151,111 @@ export class ObjectStore {
     return this.summary(this.trashedRow(id));
   }
 
-  /**
-   * ゴミ箱から戻す。置き場所の無いObjectとして戻る。書いた場所があれば、
-   * 元の場所に戻せるよう、置き場所をなくしたものとして見せる。
-   */
-  restoreObject(id: string): ObjectSummary {
-    this.trashedRow(id);
+  /** 削除時の窓を元の位置へ戻す。保存中の本文は、エディタが戻した内容を使う。 */
+  private restoreWindows(
+    id: string,
+    now: number,
+    savingHost: string | null = null,
+  ): void {
+    const existing = new Map<string, DocNode[]>();
+    const embeds = (list: readonly DocNode[]): DocNode[] =>
+      list.flatMap((node) =>
+        node.type === "objectEmbed" ? [node] : embeds(node.content ?? []),
+      );
+    const windows = this.database
+      .prepare(
+        "SELECT host_id, node, previous_id, parent_id FROM removed_windows WHERE object_id = ? ORDER BY id",
+      )
+      .all(id) as {
+      host_id: string;
+      node: string;
+      previous_id: string | null;
+      parent_id: string | null;
+    }[];
+    for (const window of windows) {
+      if (window.host_id === savingHost) continue;
+      const host = this.row(window.host_id);
+      const document =
+        isDocumentId(window.host_id) &&
+        this.database
+          .prepare("SELECT 1 FROM documents WHERE id = ?")
+          .get(window.host_id);
+      if (!host && !document) continue;
+      const node = JSON.parse(window.node) as DocNode;
+      const body = this.hostBody(window.host_id);
+      const present = existing.get(window.host_id) ?? embeds(body);
+      existing.set(window.host_id, present);
+      const at = present.findIndex(
+        (child) =>
+          child.attrs?.objectId === id &&
+          (typeof node.attrs?.id === "string"
+            ? child.attrs?.id === node.attrs.id
+            : JSON.stringify(child) === window.node),
+      );
+      if (at >= 0) {
+        present.splice(at, 1);
+        continue;
+      }
+      let inserted = false;
+      const insert = (
+        list: readonly DocNode[],
+        parentId: string | null,
+      ): DocNode[] => {
+        if (parentId === window.parent_id) {
+          const at =
+            window.previous_id === null
+              ? -1
+              : list.findIndex(
+                  (child) => child.attrs?.id === window.previous_id,
+                );
+          if (window.previous_id === null || at >= 0) {
+            inserted = true;
+            return [...list.slice(0, at + 1), node, ...list.slice(at + 1)];
+          }
+          return [...list];
+        }
+        return list.map((child) => {
+          const container = child.attrs?.id;
+          return child.content && !inserted
+            ? {
+                ...child,
+                content: insert(
+                  child.content,
+                  typeof container === "string" ? container : null,
+                ),
+              }
+            : child;
+        });
+      };
+      const restored = insert(body, null);
+      if (!inserted) restored.push(node);
+      this.database
+        .prepare(
+          `UPDATE ${host ? "objects" : "documents"} SET body = ?, updated_at = ? WHERE id = ?`,
+        )
+        .run(JSON.stringify(restored), now, window.host_id);
+      this.reindex(window.host_id, now);
+    }
+    this.database
+      .prepare("DELETE FROM removed_windows WHERE object_id = ?")
+      .run(id);
     this.database
       .prepare(
-        "UPDATE objects SET deleted_at = NULL, homeless = origin IS NOT NULL WHERE id = ?",
+        `UPDATE objects SET homeless = origin IS NOT NULL AND NOT EXISTS
+      (SELECT 1 FROM placements WHERE host_id = objects.origin AND object_id = objects.id) WHERE id = ?`,
       )
       .run(id);
+  }
+
+  /** ゴミ箱から戻し、残っている書いた場所や窓も復元する。 */
+  restoreObject(id: string): ObjectSummary {
+    this.database.transaction(() => {
+      this.trashedRow(id);
+      this.database
+        .prepare("UPDATE objects SET deleted_at = NULL WHERE id = ?")
+        .run(id);
+      this.restoreWindows(id, Date.now());
+    })();
     return this.getObject(id);
   }
 
@@ -1251,6 +1455,30 @@ export class ObjectStore {
     const type = view.scope === "type" ? stored.owner : view.type;
     const anchor =
       view.scope === "object" ? this.requireRow(anchorId ?? "").id : null;
+    let entities: ObjectRow[] | null = null;
+    if (
+      anchor !== null &&
+      type !== null &&
+      this.role(type) === null &&
+      ACTIVITY_TYPES.includes(this.role(this.requireRow(anchor).type) ?? "")
+    ) {
+      // 具象は所属を持たないので、活動の木の本文と参照Fieldから集める。
+      const tree = this.database
+        .prepare(`${REACH} SELECT o.* FROM objects o JOIN reach USING (id)`)
+        .all(anchor) as ObjectRow[];
+      const targets = new Set(
+        tree.flatMap((row) => [
+          ...refIds(nodes(row.body)),
+          ...this.fieldContents(row)
+            .filter((field) => field.kind === "reference")
+            .flatMap((field) => refIds(field.value)),
+        ]),
+      );
+      entities = [...targets].flatMap((id) => {
+        const row = this.row(id);
+        return row?.type === type ? [row] : [];
+      });
+    }
     const kinds = new Map(
       type === null ? [] : this.fieldsOf(type).map((f) => [f.id, f.kind]),
     );
@@ -1302,16 +1530,18 @@ export class ObjectStore {
       const narrowed =
         type !== null || view.done !== "all" || view.filters.length > 0;
       const entries: ObjectTimelineEntry[] =
-        anchor === null
+        anchor === null || entities !== null
           ? (
-              this.database
+              entities ??
+              (this.database
                 .prepare(
                   "SELECT * FROM objects WHERE type = ? AND deleted_at IS NULL",
                 )
-                .all(type) as ObjectRow[]
+                .all(type) as ObjectRow[])
             ).map((row) => ({
               kind: "object",
               object: this.summary(row),
+              activity: this.contextsOf(row.id)[0] ?? null,
               mentioned: false,
               via: [],
               time: row.created_at,
@@ -1319,26 +1549,28 @@ export class ObjectStore {
           : this.timeline(anchor).filter(
               (entry) => view.reach === "all" || entry.via.length === 0,
             );
-      return {
-        rows: [],
-        // 条件で絞ったTimelineには、Objectでない言及を出さない。
-        entries: entries
-          .filter((entry) =>
-            entry.kind === "object"
-              ? matches(item(this.requireRow(entry.object.id)))
-              : !narrowed,
-          )
-          .map((entry) =>
-            entry.kind === "object"
-              ? {
-                  ...entry,
-                  excerpt: this.excerpt(this.requireRow(entry.object.id)),
-                }
-              : entry,
-          )
-          .sort((a, b) => b.time - a.time),
-        objects: {},
-      };
+      // 条件で絞ったTimelineには、Objectでない言及を出さない。
+      const filtered = entries
+        .filter((entry) =>
+          entry.kind === "object"
+            ? matches(item(this.requireRow(entry.object.id)))
+            : !narrowed,
+        )
+        .map((entry) =>
+          entry.kind === "object"
+            ? {
+                ...entry,
+                excerpt: this.excerpt(this.requireRow(entry.object.id)),
+              }
+            : entry,
+        )
+        .sort((a, b) => b.time - a.time);
+      const objects: Record<string, ObjectSummary> = {};
+      for (const entry of filtered) {
+        const activity = entry.activity ? this.row(entry.activity) : undefined;
+        if (activity) objects[activity.id] = this.summary(activity);
+      }
+      return { rows: [], entries: filtered, objects };
     }
 
     const direct = (id: string): ObjectRow[] =>
@@ -1384,7 +1616,8 @@ export class ObjectStore {
           return 0;
         });
     const pool =
-      anchor === null
+      entities ??
+      (anchor === null
         ? (
             this.database
               .prepare(
@@ -1406,7 +1639,7 @@ export class ObjectStore {
               .prepare(
                 `${REACH} SELECT o.* FROM objects o JOIN reach USING (id) WHERE o.id != ?`,
               )
-              .all(anchor, anchor) as ObjectRow[]);
+              .all(anchor, anchor) as ObjectRow[]));
     const rows: ViewRow[] = [];
     const seen = new Set<string>();
     const push = (items: readonly Item[], depth: number): void => {
@@ -1602,6 +1835,17 @@ export class ObjectStore {
           );
         }
         current = next;
+      }
+      if (patch.extends !== undefined) {
+        const now = Date.now();
+        for (const { id, type } of this.database
+          .prepare("SELECT id, type FROM objects")
+          .all() as { id: string; type: string }[]) {
+          if (type !== current && !this.ancestors(type).includes(current))
+            continue;
+          this.revalidate(id, now);
+          if (this.row(id)) this.reindex(id, now);
+        }
       }
     })();
     return this.types().find((type) => type.name === current)!;
@@ -1837,7 +2081,7 @@ export class ObjectStore {
       memos,
       // Areaと具象は所属を持たないのが普通なので、未整理として扱わない。
       inbox: select(
-        `NOT EXISTS (SELECT 1 FROM contexts c JOIN objects p ON p.id = c.target_id
+        `no_activity = 0 AND NOT EXISTS (SELECT 1 FROM contexts c JOIN objects p ON p.id = c.target_id
            WHERE c.object_id = objects.id AND p.deleted_at IS NULL)
          ORDER BY created_at DESC`,
       ).filter((o) => !["area", null].includes(this.role(o.type))),
@@ -1878,6 +2122,7 @@ export class ObjectStore {
     ).map((row) => ({
       kind: "object",
       object: this.summary(row),
+      activity: this.contextsOf(row.id)[0] ?? null,
       mentioned: false,
       via: titles(pathFrom(row.id)),
       time: row.created_at,
@@ -1915,6 +2160,7 @@ export class ObjectStore {
           entries.push({
             kind: "object",
             object: this.summary(host),
+            activity: this.contextsOf(host.id)[0] ?? null,
             mentioned: true,
             ...(field ? { field } : {}),
             via,
@@ -1925,6 +2171,11 @@ export class ObjectStore {
       entries.push({
         kind: "unit",
         hostId: row.host_id,
+        activity: host
+          ? ACTIVITY_TYPES.includes(this.role(host.type) ?? "")
+            ? host.id
+            : (this.contextsOf(host.id)[0] ?? null)
+          : null,
         hostTitle: host ? this.summary(host).title : "Daily",
         unitId: row.unit_id,
         unitKind: row.unit_kind,
@@ -1949,6 +2200,7 @@ export class ObjectStore {
         "fields",
         "types",
         "views",
+        "removed_windows",
       ])
         this.database.exec(`DELETE FROM ${table}`);
       for (const type of OBJECT_TYPES) this.ensureType(type, 0);

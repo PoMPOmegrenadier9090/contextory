@@ -178,6 +178,8 @@ export interface ObjectSummary {
   readonly createdAt: number;
   /** 書いた場所。作ったときに置いた本文で、ViewやDBから作ったものはnull。 */
   readonly origin: string | null;
+  /** 活動なしで確定したObjectか。 */
+  readonly noActivity: boolean;
 }
 
 /** 文書を開いた時に、編集用の文書木と一緒に返す内容。 */
@@ -219,6 +221,7 @@ export type ObjectTimelineEntry =
   | {
       readonly kind: "object";
       readonly object: ObjectSummary;
+      readonly activity?: string | null;
       /** Contextで属するのではなく、@で言及しているだけ */
       readonly mentioned: boolean;
       /** Fieldの値で言及している場合の、Fieldの名前 */
@@ -231,6 +234,7 @@ export type ObjectTimelineEntry =
   | {
       readonly kind: "unit";
       readonly hostId: string;
+      readonly activity?: string | null;
       readonly hostTitle: string;
       readonly unitId: string;
       /** listItem: 項目と子、section: 見出し以下、block: 段落 */
