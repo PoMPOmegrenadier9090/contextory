@@ -1471,6 +1471,35 @@ html {
   padding: 0;
 }
 
+/* 具象のページで、書き込む活動を示す。 */
+.od-activity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.od-demo .od-activity button {
+  padding: 2px 8px;
+  color: inherit;
+  font: inherit;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.od-demo .od-activity > .od-pop > button {
+  color: var(--od-muted);
+  border: 1px dashed var(--od-line-strong);
+}
+
+.od-activity-note {
+  color: var(--od-muted);
+  font-size: 12px;
+}
+
 .od-demo .od-cell-refs .od-pop > button {
   color: var(--od-muted);
 }

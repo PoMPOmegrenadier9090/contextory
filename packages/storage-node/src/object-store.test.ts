@@ -434,7 +434,8 @@ describe("ObjectStore", () => {
       color: "rose",
       builtin: false,
       checkbox: true,
-      fields: [{ id: "context" }, { id: "related" }, { id: "place" }],
+      // 具象はContextを持たない。
+      fields: [{ id: "related" }, { id: "place" }],
     });
     // 種別の名前を変えても、Viewはそのまま使える。
     expect(
@@ -445,7 +446,7 @@ describe("ObjectStore", () => {
     store.updateType("meeting", { fields: [] });
     expect(
       store.loadPage(DAILY).doc.content?.[0]?.content?.map((n) => n.type),
-    ).toEqual(["objectTitle", "objectField", "objectField"]);
+    ).toEqual(["objectTitle", "objectField"]);
     expect(() => store.updateType("task", { name: "todo" })).toThrow(TypeError);
     expect(() => store.updateType("meeting", { name: "task" })).toThrow(
       TypeError,
@@ -551,7 +552,7 @@ describe("ObjectStore", () => {
     });
     expect(store.types().find((type) => type.name === "1on1")).toMatchObject({
       extends: "会議",
-      fields: [{ id: "context" }, { id: "related" }, { id: "who" }],
+      fields: [{ id: "related" }, { id: "who" }],
       inherited: [{ id: "when" }, { id: "state", options: ["予定", "済"] }],
     });
     expect(() => store.updateType("会議", { extends: "1on1" })).toThrow(
@@ -581,7 +582,6 @@ describe("ObjectStore", () => {
       .loadPage(DAILY)
       .doc.content?.[1]?.content?.map((node) => [node.type, node.attrs]);
     expect(rows?.slice(1)).toMatchObject([
-      ["objectField", { fieldId: "context" }],
       ["objectField", { fieldId: "related" }],
       ["objectField", { fieldId: "who" }],
       ["objectFieldControl", { fieldId: "when", value: "2026-11-20" }],
@@ -840,26 +840,35 @@ describe("ObjectStore", () => {
       ),
       10,
     );
-    // 具象は活動の下に置かない。活動はMemoの所属として優先する。
+    // 具象はContextを持たない。Contextは常に活動を指す。
     expect(store.getObject("person").contexts).toEqual([]);
     expect(related("person")).toEqual(["project"]);
     expect(store.getObject("memoB").contexts).toEqual(["project"]);
     expect(related("memoB")).toEqual(["person"]);
 
-    // 具象の下にはTaskを置けるが、Projectは置けない。
-    store.addContext("task", "person");
-    expect(store.getObject("task").contexts).toEqual(["person"]);
-    expect(() => store.addContext("other", "person")).toThrow("not allowed");
+    expect(() => store.addContext("task", "person")).toThrow("not allowed");
     expect(() => store.addContext("area", "project")).toThrow(ObjectStoreError);
+    // Area→Project→Taskの順を守れば、Area直下のTaskも置ける。
+    store.addContext("task", "area");
+    expect(store.getObject("task").contexts).toEqual(["area"]);
     // Projectの中で作った具象は、所属なしになる。
     expect(
       store.savePage("project", doc(block("co", "Company", "A社")), 11).objects
         .co?.contexts,
     ).toEqual([]);
+    // 具象の中で作ったものは、所属なしで、その具象を参照に残す。
+    store.savePage("person", doc(block("note", "memo", "人のメモ")), 12);
+    expect(store.getObject("note").contexts).toEqual([]);
+    expect(related("note")).toEqual(["person"]);
+    store.createObject(
+      { id: "todo", type: "task", title: "お礼", parentId: "person" },
+      12,
+    );
+    expect(related("todo")).toEqual(["person"]);
     // 種別が変わって親になれなくなったら、所属を参照へ移す。
-    store.patchObject("task", { type: "project" }, 12);
+    store.patchObject("task", { type: "area" }, 13);
     expect(store.getObject("task").contexts).toEqual([]);
-    expect(related("task")).toEqual(["person"]);
+    expect(related("task")).toEqual(["area"]);
   });
 
   it("does not aggregate memos through a shared entity", () => {
@@ -898,6 +907,7 @@ describe("ObjectStore", () => {
             record("project", "project", ["area"], 2),
             record("person", "Person", [], 3),
             record("memo", "memo", [], 4),
+            record("note", "memo", [], 5),
           ],
           documents: {},
         },
@@ -908,13 +918,16 @@ describe("ObjectStore", () => {
       const raw = new Database(path);
       raw.exec(`
         INSERT INTO contexts VALUES ('person', 'area', 0), ('person', 'project', 1),
-          ('memo', 'person', 0), ('memo', 'project', 1);
+          ('memo', 'person', 0), ('memo', 'project', 1), ('note', 'person', 0);
         PRAGMA user_version = 7;
       `);
       raw.close();
       const migrated = new ObjectStore(path);
       expect(migrated.getObject("person").contexts).toEqual([]);
       expect(migrated.getObject("memo").contexts).toEqual(["project"]);
+      // 具象を所属にしていたものは所属なしになり、Inboxで振り分け直す。
+      expect(migrated.getObject("note").contexts).toEqual([]);
+      expect(migrated.overview(0).inbox.map((o) => o.id)).toContain("note");
       // 外れたContextは参照に残り、参照先のTimelineに届く。
       expect(
         migrated

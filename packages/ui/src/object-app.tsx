@@ -1,4 +1,5 @@
 import {
+  ACTIVITY_TYPES,
   canContain,
   CONTEXT_FIELD,
   DAILY_UNDATED_ID,
@@ -377,6 +378,8 @@ export const ObjectApp = ({
   };
   /** 開いているゴミ箱の中身。nullならゴミ箱を開いていない。 */
   const [inboxOpen, setInboxOpen] = useState(false);
+  /** 開いている活動。具象のページで書くものの所属に使う。 */
+  const [activity, setActivity] = useState<string | null>(null);
   const [trashList, setTrashList] = useState<readonly ObjectSummary[] | null>(
     null,
   );
@@ -532,6 +535,10 @@ export const ObjectApp = ({
       merge(result.objects);
       const own = result.objects[hostId]?.title ?? "";
       setTitle(own === "無題" ? "" : own);
+      // 活動を開いたらそれを状態にし、Dailyでは外す。具象へ移っても引き継ぐ。
+      const opened = result.objects[hostId];
+      if (isDaily(hostId)) setActivity(null);
+      else if (opened && isActivity(opened.type)) setActivity(hostId);
       setLoaded({ key: ++loads.current, hostId, doc: result.doc });
       setTypePage(null);
       setTrashList(null);
@@ -549,6 +556,7 @@ export const ObjectApp = ({
       setLoaded(null);
       setTrashList(null);
       setInboxOpen(false);
+      setActivity(null);
       setTypePage({ name, settings: false });
       window.scrollTo({ top: 0 });
     });
@@ -571,6 +579,7 @@ export const ObjectApp = ({
       setTypePage(null);
       setTrashList(null);
       setInboxOpen(true);
+      setActivity(null);
       await refreshSide(dailyHostId());
       window.scrollTo({ top: 0 });
     });
@@ -706,6 +715,7 @@ export const ObjectApp = ({
         <EmbeddedView viewId={viewId} anchorId={anchorId} />
       ),
       types: () => types,
+      activity,
       page: current ? { id: current.id, type: current.type } : null,
       search: (query) =>
         client.searchObjects(query, page).then((found) => {
@@ -745,7 +755,7 @@ export const ObjectApp = ({
           });
       },
     }),
-    [objects, types, page, current?.id, current?.type],
+    [objects, types, page, current?.id, current?.type, activity],
   );
 
   const showCapture = (input: CaptureInput): void => {
@@ -755,12 +765,14 @@ export const ObjectApp = ({
     );
     setCapture({ ...input, key: ++loads.current });
   };
-  // Objectのページで開いたら、そのObjectをContextの候補にして始める。保存前に外せる。
+  // 開いている活動をContextに、具象のページならその具象を参照にして始める。保存前に外せる。
   const startCapture = (): void => {
     if (!capture)
       showCapture({
         title: "",
-        context: current && !typePage ? current.id : null,
+        context: typePage ? null : activity,
+        related:
+          current && !typePage && isEntity(current.type) ? current.id : null,
         body: emptyBody(),
       });
   };
@@ -825,6 +837,9 @@ export const ObjectApp = ({
     typeOf(type)?.color ?? undefined;
   const roleOf = (type: ObjectType): ObjectType | null =>
     typeRole(type, (t) => typeOf(t)?.extends);
+  const isActivity = (type: ObjectType): boolean =>
+    ACTIVITY_TYPES.includes(roleOf(type) ?? "");
+  const isEntity = (type: ObjectType): boolean => roleOf(type) === null;
   const viewProps = {
     client,
     types,
@@ -912,7 +927,15 @@ export const ObjectApp = ({
           >
             ☰
           </button>
-          <ObjectSearch client={client} open={open} openType={openType} />
+          <ObjectSearch
+            client={client}
+            open={(id) => {
+              // 検索から開いたら、前の活動を引き継がない。
+              setActivity(null);
+              open(id);
+            }}
+            openType={openType}
+          />
           <span
             className="od-save-status"
             role="status"
@@ -1026,6 +1049,23 @@ export const ObjectApp = ({
                     aria-label="Contextを外す"
                     onClick={() =>
                       setCapture((last) => last && { ...last, context: null })
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              </p>
+            ) : null}
+            {capture.related ? (
+              <p className="od-capture-context">
+                参照
+                <span>
+                  {objects[capture.related]?.title ?? "無題"}
+                  <button
+                    type="button"
+                    aria-label="参照を外す"
+                    onClick={() =>
+                      setCapture((last) => last && { ...last, related: null })
                     }
                   >
                     ×
@@ -1476,6 +1516,56 @@ export const ObjectApp = ({
                       );
                     }}
                   />
+                  {isEntity(current.type) ? (
+                    <div className="od-activity">
+                      {activity ? (
+                        <span className="od-chip">
+                          <button type="button" onClick={() => open(activity)}>
+                            {objects[activity]?.title ?? "…"}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="活動を外す"
+                            onClick={() => setActivity(null)}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ) : null}
+                      <Popover
+                        label={activity ? "切り替える" : "活動を選ぶ"}
+                        ariaLabel="書き込む活動を選ぶ"
+                      >
+                        {(close) => (
+                          <Chooser
+                            placeholder="活動を探す"
+                            load={async (query) => {
+                              const found = (
+                                await client.searchObjects(query, null)
+                              ).filter((o) => isActivity(o.type));
+                              merge(
+                                Object.fromEntries(found.map((o) => [o.id, o])),
+                              );
+                              return found.map((o) => ({
+                                key: o.id,
+                                label: o.title,
+                                note: `#${typeLabel(o.type)}`,
+                              }));
+                            }}
+                            onPick={(choice) => {
+                              close();
+                              setActivity(choice.key);
+                            }}
+                          />
+                        )}
+                      </Popover>
+                      <span className="od-activity-note">
+                        {activity
+                          ? "ここで書いたものの所属"
+                          : "所属なしで書きます（Inboxへ）"}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="od-page-meta">
                     {hasCheckbox(current.type) ? (
                       <label className="od-status">

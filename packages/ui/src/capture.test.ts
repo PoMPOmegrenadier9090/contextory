@@ -34,6 +34,14 @@ describe("Quick Capture", () => {
     ]);
     expect(memo.content?.[0]?.content).toEqual([text("考え")]);
     expect(JSON.stringify(memo.content?.[1])).toContain('"objectId":"project"');
+    // 具象のページで書いたときは、その具象を参照の行に入れる。
+    const related = captureMemo({
+      title: "人",
+      context: null,
+      related: "person",
+      body: emptyBody(),
+    })!;
+    expect(related.content?.[1]?.attrs).toMatchObject({ fieldId: "related" });
   });
 
   it("folds a title-only Memo and keeps an untitled one", () => {

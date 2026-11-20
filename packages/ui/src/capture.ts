@@ -1,10 +1,19 @@
-import { CONTEXT_FIELD, fieldNode, newId, type DocNode } from "@pkm/core";
+import {
+  CONTEXT_FIELD,
+  fieldNode,
+  newId,
+  RELATED_FIELD,
+  type DocNode,
+  type FieldDefinition,
+} from "@pkm/core";
 
 /** Quick Captureで書いている内容。本文はMemoの本文だけを持つ文書。 */
 export interface CaptureInput {
   readonly title: string;
   /** Contextに付けるObject。外せばnull */
   readonly context: string | null;
+  /** 参照に付けるObject。具象のページで書いたときの、その具象。 */
+  readonly related?: string | null;
   readonly body: DocNode;
 }
 
@@ -18,6 +27,19 @@ const written = (node: DocNode): boolean =>
   Boolean(node.text?.trim()) ||
   node.type === "objectRef" ||
   (node.content ?? []).some(written);
+
+const refRow = (
+  field: FieldDefinition,
+  objectId: string | null | undefined,
+): DocNode[] =>
+  objectId
+    ? [
+        fieldNode({
+          ...field,
+          value: [{ type: "objectRef", attrs: { objectId } }],
+        }),
+      ]
+    : [];
 
 /** Dailyへ足すMemo。TitleにもBodyにも書いていなければnull。 */
 export const captureMemo = (input: CaptureInput): DocNode | null => {
@@ -41,16 +63,8 @@ export const captureMemo = (input: CaptureInput): DocNode | null => {
       title
         ? { type: "objectTitle", content: [{ type: "text", text: title }] }
         : { type: "objectTitle" },
-      ...(input.context
-        ? [
-            fieldNode({
-              ...CONTEXT_FIELD,
-              value: [
-                { type: "objectRef", attrs: { objectId: input.context } },
-              ],
-            }),
-          ]
-        : []),
+      ...refRow(CONTEXT_FIELD, input.context),
+      ...refRow(RELATED_FIELD, input.related),
       ...body,
     ],
   };

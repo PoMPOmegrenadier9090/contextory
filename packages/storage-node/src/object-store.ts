@@ -46,7 +46,7 @@ import {
 
 import { safeName, toMarkdown, type MarkdownLookup } from "./markdown.js";
 
-export const OBJECT_STORE_SCHEMA_VERSION = 8;
+export const OBJECT_STORE_SCHEMA_VERSION = 9;
 
 /** Objectに属さない文書のID。いまはDailyだけがこれに当たる。 */
 const isDocumentId = (id: string): boolean =>
@@ -254,9 +254,10 @@ export class ObjectStore {
         this.database.pragma("user_version = 7");
       })();
     for (const type of OBJECT_TYPES) this.ensureType(type, 0);
-    if (version < 8)
+    // v8で所属を1つにし、v9でContextを活動だけに限った。同じ手順なので、どちらも
+    // ここで当て直す。外れたContextは消さずに参照へ移す。
+    if (version < 9)
       this.database.transaction(() => {
-        // 所属を1つにする。外れたContextは消さずに参照へ移す。
         const now = Date.now();
         for (const id of this.database
           .prepare("SELECT DISTINCT object_id FROM contexts")
@@ -265,7 +266,7 @@ export class ObjectStore {
           this.assignContexts(id, this.contextsOf(id), true);
           if (this.exists(id)) this.reindex(id, now);
         }
-        this.database.pragma("user_version = 8");
+        this.database.pragma("user_version = 9");
       })();
   }
 
@@ -473,9 +474,13 @@ export class ObjectStore {
       ...field,
       ...(options ? { options: JSON.parse(options) as string[] } : {}),
     }));
-    const all = fields.some((field) => field.id === CONTEXT_FIELD.id)
-      ? fields
-      : [CONTEXT_FIELD, ...fields];
+    // 具象はContextを持たないので、行も出さない。
+    const all =
+      this.role(type) === null
+        ? fields.filter((field) => field.id !== CONTEXT_FIELD.id)
+        : fields.some((field) => field.id === CONTEXT_FIELD.id)
+          ? fields
+          : [CONTEXT_FIELD, ...fields];
     // 参照は保存せず、Contextの直後に必ず置く。
     const at = all.findIndex((field) => field.id === CONTEXT_FIELD.id) + 1;
     return [...all.slice(0, at), RELATED_FIELD, ...all.slice(at)];
@@ -548,7 +553,8 @@ export class ObjectStore {
     for (const field of fields) {
       const kind = known.get(field.id)?.kind;
       // 外れたContextを参照へ足すので、参照の行より後で保存する。
-      if (kind === "context") contexts = refIds(field.value);
+      // 具象にはContextの行が無いが、届いた値は参照へ移すために受け取る。
+      if (field.id === CONTEXT_FIELD.id) contexts = refIds(field.value);
       else if (kind && field.value.length)
         this.database
           .prepare(
@@ -564,6 +570,11 @@ export class ObjectStore {
           .run(id, field.id);
     }
     if (contexts) this.assignContexts(id, contexts, true);
+  }
+
+  /** 具象の中で作ったものは、その具象を参照の行に残す。 */
+  private isEntity(row: ObjectRow | undefined): boolean {
+    return row !== undefined && this.role(row.type) === null;
   }
 
   /** 種別の役割。組み込みの種別か、それを継いだ種別ならその名前。nullは具象。 */
@@ -830,7 +841,7 @@ export class ObjectStore {
           this.assignContexts(
             id,
             inheritedContexts(parent && this.summary(parent)),
-            false,
+            this.isEntity(parent),
           );
         }
       };
@@ -905,7 +916,7 @@ export class ObjectStore {
       this.assignContexts(
         input.id,
         inheritedContexts(parent && this.summary(parent)),
-        false,
+        this.isEntity(parent),
       );
     })();
     return this.getObject(input.id);
