@@ -176,16 +176,37 @@ export interface ObjectSummary {
   readonly done: boolean;
   readonly contexts: readonly string[];
   readonly createdAt: number;
+  /** 書いた場所。作ったときに置いた本文で、ViewやDBから作ったものはnull。 */
+  readonly origin: string | null;
 }
 
 /** 文書を開いた時に、編集用の文書木と一緒に返す内容。 */
 export interface ObjectPage {
   readonly doc: DocNode;
+  /** hostがObjectなら、そのTitle。本文に埋め込み直すときに使う。 */
+  readonly title?: readonly DocNode[];
   /** 文書内のObject、参照先、それらのContext先 */
   readonly objects: Readonly<Record<string, ObjectSummary>>;
   /** 開いた時点の文書の版。保存時に渡すと、他で変わっていれば保存を断る。 */
   readonly revision: string;
 }
+
+/** 開いたObjectのページから、本文に埋め込むBlockを作る。IDだけの空のBlockは内容を消すので使わない。 */
+export const objectBlockOf = (id: string, page: ObjectPage): DocNode => ({
+  type: "objectBlock",
+  attrs: {
+    objectId: id,
+    type: page.objects[id]?.type,
+    done: page.objects[id]?.done ?? false,
+    collapsed: true,
+  },
+  content: [
+    page.title?.length
+      ? { type: "objectTitle", content: page.title }
+      : { type: "objectTitle" },
+    ...(page.doc.content ?? []),
+  ],
+});
 
 /** 他の画面や端末で文書が変わっていて、保存を断ったことを示す。 */
 export const PAGE_CONFLICT = "PAGE_CONFLICT";

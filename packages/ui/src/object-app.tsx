@@ -6,10 +6,12 @@ import {
   inheritedContexts,
   isPageConflict,
   newId,
+  objectBlockOf,
   TYPE_COLORS,
   typeRole,
   type DocNode,
   type FieldDefinition,
+  type HomelessObject,
   type ObjectClient,
   type ObjectOverview,
   type ObjectSummary,
@@ -327,6 +329,7 @@ export const ObjectApp = ({
     recent: [],
     memos: [],
     inbox: [],
+    homeless: [],
   });
   const [types, setAllTypes] = useState<readonly TypeDefinition[]>([]);
   const setTypes: typeof setAllTypes = (next) =>
@@ -464,7 +467,9 @@ export const ObjectApp = ({
     // Inboxを知らない古いサーバーにつないでも、画面は落とさない。
     const inbox =
       (nextOverview.inbox as typeof nextOverview.inbox | undefined) ?? [];
-    setOverview({ ...nextOverview, inbox });
+    const homeless =
+      (nextOverview.homeless as typeof nextOverview.homeless | undefined) ?? [];
+    setOverview({ ...nextOverview, inbox, homeless });
     setTypes(nextTypes);
     merge(
       Object.fromEntries(
@@ -599,6 +604,35 @@ export const ObjectApp = ({
       await refreshSide(dailyHostId());
     });
   };
+  /** 置き場所をなくしたObjectへの操作。済んだら一覧を読み直す。 */
+  const actOnHomeless = (task: () => Promise<unknown>): void => {
+    flush();
+    void enqueue(async () => {
+      await task();
+      await refreshSide(dailyHostId());
+    });
+  };
+  /** 最後の書いた場所の末尾へ埋め込み直す。保存で、そこが書いた場所に戻る。 */
+  const putBack = ({ object, originId }: HomelessObject): void => {
+    if (originId !== null)
+      actOnHomeless(async () => {
+        const [target, self] = await Promise.all([
+          client.loadPage(originId),
+          client.loadPage(object.id),
+        ]);
+        await client.savePage(
+          originId,
+          {
+            ...target.doc,
+            content: [
+              ...(target.doc.content ?? []),
+              objectBlockOf(object.id, self),
+            ],
+          },
+          target.revision,
+        );
+      });
+  };
   /** ゴミ箱での操作。済んだら一覧を読み直す。 */
   const actOnTrash = (task: () => Promise<unknown>): void => {
     void enqueue(async () => {
@@ -710,7 +744,21 @@ export const ObjectApp = ({
   // 表示に関わるObject・種別・開いているページが変わったときだけ作り直す。
   const host = useMemo<EditorHost>(
     () => ({
+      hostId: page,
       lookup: (id) => objects[id],
+      // 窓を消した本文の保存を先に送り、ゴミ箱へ移してから一覧を読み直す。
+      trash: (id) => {
+        flush();
+        return enqueue(async () => {
+          await client.trashObject(id);
+          if (page !== null) await refreshSide(page);
+        });
+      },
+      load: async (id) => {
+        const loadedPage = await client.loadPage(id);
+        merge(loadedPage.objects);
+        return objectBlockOf(id, loadedPage);
+      },
       renderView: (viewId, anchorId) => (
         <EmbeddedView viewId={viewId} anchorId={anchorId} />
       ),
@@ -734,6 +782,7 @@ export const ObjectApp = ({
             done: false,
             contexts: inheritedContexts(parent ? objects[parent] : undefined),
             createdAt: Date.now(),
+            origin: null,
           },
         );
         return id;
@@ -875,6 +924,7 @@ export const ObjectApp = ({
       done: false,
       contexts: [],
       createdAt: Date.now(),
+      origin: null,
     };
     mutate(
       () =>
@@ -1115,7 +1165,8 @@ export const ObjectApp = ({
               <ObjectEditor
                 key={capture.key}
                 initialDoc={capture.body}
-                host={host}
+                // 保存前の下書きなので、窓を消してもゴミ箱へは送らない。
+                host={{ ...host, hostId: null }}
                 ariaLabel="Memoの本文"
                 onChange={(doc) => {
                   capturedBody.current = doc;
@@ -1262,8 +1313,10 @@ export const ObjectApp = ({
             onClick={go(openInbox)}
           >
             Inbox
-            {overview.inbox.length ? (
-              <span className="od-nav-count">{overview.inbox.length}</span>
+            {overview.inbox.length + overview.homeless.length ? (
+              <span className="od-nav-count">
+                {overview.inbox.length + overview.homeless.length}
+              </span>
             ) : null}
           </button>
           {areas.map((area) => (
@@ -1371,6 +1424,74 @@ export const ObjectApp = ({
               ) : (
                 <p className="od-empty">未整理のものはありません。</p>
               )}
+              {overview.homeless.length ? (
+                <section aria-labelledby="homeless-heading">
+                  <h2 id="homeless-heading" className="od-section-heading">
+                    置き場所をなくしたもの
+                  </h2>
+                  <p className="od-page-meta">
+                    書いた場所から切り取られ、まだどこにも貼られていないもの
+                  </p>
+                  <ul className="od-rows">
+                    {overview.homeless.map((item) => (
+                      <li key={item.object.id} className="od-row od-inbox-row">
+                        <span
+                          className="od-type"
+                          data-type={item.object.type}
+                          data-color={colorOf(item.object.type)}
+                        >
+                          {typeLabel(item.object.type)}
+                        </span>
+                        <button
+                          type="button"
+                          className="od-trash-title"
+                          onClick={() => open(item.object.id)}
+                        >
+                          <strong>{item.object.title}</strong>
+                          {item.originId !== null ? (
+                            <small>
+                              {placeLabel(item.originId, item.originTitle)}
+                              から
+                            </small>
+                          ) : null}
+                        </button>
+                        <div className="od-homeless-actions">
+                          <button
+                            type="button"
+                            disabled={item.originId === null}
+                            onClick={() => putBack(item)}
+                          >
+                            元の場所に戻す
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              actOnHomeless(() =>
+                                client.patchObject(item.object.id, {
+                                  origin: null,
+                                }),
+                              )
+                            }
+                          >
+                            このまま残す
+                          </button>
+                          <button
+                            type="button"
+                            className="od-danger"
+                            onClick={() =>
+                              actOnHomeless(() =>
+                                client.trashObject(item.object.id),
+                              )
+                            }
+                          >
+                            ゴミ箱へ
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
             </>
           ) : trashList ? (
             <>

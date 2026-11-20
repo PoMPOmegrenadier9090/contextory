@@ -65,18 +65,39 @@ import {
   selectBlock,
 } from "./block-selection.js";
 import { conversionAt } from "./object-conversion.js";
-import { DatePanel, formatDate, Chooser, Popover } from "./view-controls.js";
+import {
+  containsObject,
+  objectIdsIn,
+  objectsAround,
+  removedWindows,
+  type RemovedWindow,
+} from "./object-windows.js";
+import {
+  DatePanel,
+  formatDate,
+  Chooser,
+  Popover,
+  type Choice,
+} from "./view-controls.js";
 
 /** エディタが表示に使うObjectの情報。 */
 export interface EditorObject {
   readonly id: string;
   readonly type: ObjectType;
   readonly title: string;
+  /** 書いた場所。ここにある窓を消すとゴミ箱へ移す。 */
+  readonly origin?: string | null;
 }
 
 /** エディタが外側（Objectの保存先）へ頼む操作。 */
 export interface EditorHost {
+  /** 開いている文書（ObjectかDaily）。nullなら保存前の下書きで、窓を消しても何もしない。 */
+  readonly hostId: string | null;
   readonly lookup: (id: string) => EditorObject | undefined;
+  /** ゴミ箱へ移す。書いた場所の窓を、切り取り以外で消したときに呼ぶ。 */
+  readonly trash?: (id: string) => Promise<void>;
+  /** 既存のObjectの内容を読み、本文に埋め込むBlockにする。 */
+  readonly load?: (id: string) => Promise<DocNode>;
   readonly search: (query: string) => Promise<readonly EditorObject[]>;
   /** 文書に置かないObjectを作る。parentIdは入力位置を包むObject。 */
   readonly create: (
@@ -680,6 +701,8 @@ const unwrapObject = (
     ...body,
   ]);
   tr.setSelection(TextSelection.create(tr.doc, start + 1));
+  // 中身は本文に残るので、窓を戻す「元に戻す」は出さない。
+  tr.setMeta("unwrapObject", true);
 };
 
 const ObjectBlock = Node.create({
@@ -1307,7 +1330,15 @@ interface BlockItem {
   readonly run?: () => void;
   /** 選ぶと、この一覧に切り替える。 */
   readonly items?: readonly BlockItem[];
+  /** 選ぶと、検索して選ぶ欄に切り替える。 */
+  readonly choose?: BlockChoose;
   readonly danger?: boolean;
+}
+
+interface BlockChoose {
+  readonly placeholder: string;
+  readonly load: (query: string) => Promise<readonly Choice[]>;
+  readonly onPick: (choice: Choice) => void;
 }
 
 interface BlockMenu {
@@ -1316,6 +1347,7 @@ interface BlockMenu {
   /** trueなら、yを下端にして上へ開く（キーボードの上の帯から開いたとき）。 */
   readonly above?: boolean;
   readonly items: readonly BlockItem[];
+  readonly choose?: BlockChoose | undefined;
 }
 
 /** 右クリックや「⋯」で出すメニュー。選んでいる文字、Object、場所に合わせて並べる。 */
@@ -1324,6 +1356,7 @@ const blockItems = (
   host: EditorHost,
   pos: number,
   objectAt: number | null,
+  notify: (text: string) => void,
 ): BlockItem[] => {
   const { selection } = editor.state;
   if (
@@ -1352,7 +1385,7 @@ const blockItems = (
       },
       {
         key: "delete",
-        label: "選択したブロックを削除（ゴミ箱へ）",
+        label: "選択したブロックを削除",
         danger: true,
         run: () => run(() => editor.commands.deleteSelection()),
       },
@@ -1437,7 +1470,13 @@ const blockItems = (
       },
       {
         key: "delete",
-        label: "削除（ゴミ箱へ）",
+        // 書いた場所の窓だけがObjectをゴミ箱へ送る。ほかの窓は外れるだけ。
+        label:
+          host.lookup(id)?.origin ===
+          (objectsAround(editor.state.doc.resolve(objectAt)).at(-1) ??
+            host.hostId)
+            ? "削除（ゴミ箱へ）"
+            : "この場所から外す",
         danger: true,
         run: () => select() && editor.commands.deleteSelection(),
       },
@@ -1448,6 +1487,59 @@ const blockItems = (
     label: "新しいObjectを埋め込む",
     items: choose((type) => embedObject(editor, pos, objectAt, type, host)),
   });
+  const load = host.load;
+  if (load && host.hostId !== null) {
+    const after = afterBlock(editor, pos, objectAt);
+    items.push({
+      key: "embed-existing",
+      label: "既存のObjectを埋め込む",
+      choose: {
+        placeholder: "埋め込むObjectを探す",
+        load: async (query) => {
+          // 同じ文書に二つ窓があると、片方の編集がもう片方で上書きされる。
+          const placed = objectIdsIn(editor.state.doc);
+          return (await host.search(query))
+            .filter(
+              (found) =>
+                !placed.has(found.id) &&
+                found.id !== host.hostId &&
+                found.id !== host.page?.id,
+            )
+            .map((found) => ({
+              key: found.id,
+              label: found.title,
+              note: `#${typeLabel(found.type)}`,
+            }));
+        },
+        onPick: (choice) =>
+          void load(choice.key).then(
+            (block) => {
+              if (editor.isDestroyed) return;
+              const at = Math.min(after, editor.state.doc.content.size);
+              const around = new Set([
+                host.hostId,
+                host.page?.id,
+                ...objectsAround(editor.state.doc.resolve(at)),
+              ]);
+              // 自分の配下に自分を埋め込むと、窓が循環する。
+              if (containsObject(block, around))
+                return notify(
+                  `「${choice.label}」は、この場所を中に含むので埋め込めません`,
+                );
+              editor
+                .chain()
+                .focus()
+                .insertContentAt(at, block as JSONContent)
+                .run();
+            },
+            (error: unknown) =>
+              notify(
+                `埋め込めませんでした: ${error instanceof Error ? error.message : String(error)}`,
+              ),
+          ),
+      },
+    });
+  }
   if (host.renderView) {
     const views = host.types().flatMap((owner) =>
       owner.views
@@ -1639,6 +1731,18 @@ export const ObjectEditor = ({
   const [active, setActive] = useState(0);
   const [blockMenu, setBlockMenu] = useState<BlockMenu | null>(null);
   const blockMenuRef = useRef<HTMLDivElement>(null);
+  /** 窓を消したときなどの通知。undoなら「元に戻す」で窓を戻す。 */
+  const [notice, setNotice] = useState<{
+    readonly text: string;
+    readonly undo: boolean;
+  } | null>(null);
+  /** 「元に戻す」で戻す窓。位置は以後の編集に合わせて動かす。 */
+  const removedRef = useRef<RemovedWindow[]>([]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   // 実際の大きさを測って、押した位置から画面の内側へ開く。下に入らなければ上へ開く。
   useLayoutEffect(() => {
     const element = blockMenuRef.current;
@@ -1676,12 +1780,66 @@ export const ObjectEditor = ({
           x,
           y,
           above,
-          items: blockItems(current, hostRef.current, pos, at),
+          items: blockItems(current, hostRef.current, pos, at, (text) =>
+            setNotice({ text, undo: false }),
+          ),
         });
       },
   );
-  const latest = useRef({ host, onChange });
-  latest.current = { host, onChange };
+  /**
+   * 窓が消えたら、書いた場所のものはゴミ箱へ移し、ほかは外れたと知らせる。
+   * 切り取り・ドラッグでは何もしない。保存の側で、置き場所をなくした印が付く。
+   */
+  const onRemoved = (tr: Transaction): void => {
+    for (const item of removedRef.current)
+      item.pos = tr.mapping.map(item.pos, -1);
+    const event: unknown = tr.getMeta("uiEvent");
+    const current = hostRef.current;
+    if (event === "cut" || event === "drop" || current.hostId === null) return;
+    // まだ保存していないObjectは、文書から消えるだけ。
+    const removed = removedWindows(tr, current.hostId).filter((item) =>
+      current.lookup(item.id),
+    );
+    if (!removed.length) return;
+    const written = removed.filter(
+      (item) => current.lookup(item.id)?.origin === item.hostId,
+    );
+    for (const item of written) void current.trash?.(item.id);
+    const name = (items: readonly RemovedWindow[]): string =>
+      items.length === 1
+        ? `「${current.lookup(items[0]!.id)?.title ?? "無題"}」`
+        : `${items.length}件`;
+    const others = removed.length - written.length;
+    removedRef.current = removed;
+    setNotice({
+      text: written.length
+        ? `${name(written)}をゴミ箱へ移しました${others ? `（ほか${others}件はこの場所から外しました）` : ""}`
+        : `${name(removed)}をこの場所から外しました`,
+      undo: !tr.getMeta("unwrapObject"),
+    });
+  };
+  /** 消した窓を元の位置へ戻す。ゴミ箱へ移したObjectは、保存で戻る。 */
+  const undoRemoved = (): void => {
+    const items = removedRef.current;
+    removedRef.current = [];
+    setNotice(null);
+    editorRef.current
+      ?.chain()
+      .focus()
+      .command(({ tr }) => {
+        for (const item of [...items].sort((a, b) => b.pos - a.pos))
+          try {
+            tr.insert(Math.min(item.pos, tr.doc.content.size), item.node);
+          } catch {
+            // 置けない位置になっていれば、文書の末尾に戻す。
+            tr.insert(tr.doc.content.size, item.node);
+          }
+        return true;
+      })
+      .run();
+  };
+  const latest = useRef({ host, onChange, onRemoved });
+  latest.current = { host, onChange, onRemoved };
   const hostRef = useRef(host);
   hostRef.current = host;
   // キー入力は描画を待たずに届くので、メニューの最新状態はrefにも持つ。
@@ -1759,8 +1917,11 @@ export const ObjectEditor = ({
         },
       },
     },
-    onUpdate: ({ editor: updated }) =>
-      latest.current.onChange(updated.getJSON() as DocNode),
+    onUpdate: ({ editor: updated, transaction }) => {
+      // 保存の列に削除より先に本文を並べるため、ゴミ箱へ送る前に知らせる。
+      latest.current.onChange(updated.getJSON() as DocNode);
+      latest.current.onRemoved(transaction);
+    },
   });
 
   editorRef.current = editor;
@@ -1840,25 +2001,63 @@ export const ObjectEditor = ({
               ? { bottom: window.innerHeight - blockMenu.y }
               : { top: blockMenu.y }),
           }}
-          onMouseDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => {
+            // 検索欄は押して文字を選べるようにする。
+            if (!(event.target instanceof HTMLInputElement))
+              event.preventDefault();
+          }}
         >
-          {blockMenu.items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              data-danger={item.danger}
-              onClick={() => {
-                if (item.items)
-                  return setBlockMenu({ ...blockMenu, items: item.items });
+          {blockMenu.choose ? (
+            <Chooser
+              placeholder={blockMenu.choose.placeholder}
+              load={blockMenu.choose.load}
+              onPick={(choice) => {
                 setBlockMenu(null);
-                item.run?.();
+                blockMenu.choose?.onPick(choice);
               }}
-            >
-              {item.label}
-              {item.items ? <span aria-hidden="true">›</span> : null}
+            />
+          ) : (
+            blockMenu.items.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                role="menuitem"
+                data-danger={item.danger}
+                onClick={() => {
+                  if (item.items || item.choose)
+                    return setBlockMenu({
+                      ...blockMenu,
+                      items: item.items ?? [],
+                      choose: item.choose,
+                    });
+                  setBlockMenu(null);
+                  item.run?.();
+                }}
+              >
+                {item.label}
+                {item.items || item.choose ? (
+                  <span aria-hidden="true">›</span>
+                ) : null}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="pe-notice" role="status">
+          <span>{notice.text}</span>
+          {notice.undo ? (
+            <button type="button" onClick={undoRemoved}>
+              元に戻す
             </button>
-          ))}
+          ) : null}
+          <button
+            type="button"
+            aria-label="通知を閉じる"
+            onClick={() => setNotice(null)}
+          >
+            ×
+          </button>
         </div>
       ) : null}
       {menu ? (

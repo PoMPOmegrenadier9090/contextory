@@ -159,7 +159,14 @@ export const DayMemoCard = ({
           initialDoc={loaded.doc}
           host={{
             ...host,
+            hostId: id,
             page: { id, type: memo.object.type },
+            // このMemoの本文の保存を先に送ってから、ゴミ箱へ移す。
+            trash: (objectId) => {
+              flush();
+              queue.current = queue.current.then(() => host.trash?.(objectId));
+              return queue.current;
+            },
             // 中で作ったObjectは、このMemoのContextを継ぐ。
             create: (type, value, parentId) =>
               host.create(type, value, parentId ?? id),

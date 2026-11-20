@@ -146,7 +146,7 @@ describe("ObjectStore", () => {
     expect(page.objects.new?.contexts).toEqual(["project"]);
   });
 
-  it("keeps contexts on later saves and trashes objects removed from the document", () => {
+  it("keeps contexts on later saves and marks objects cut from where they were written", () => {
     const tree = doc(block("new", "task", "a", block("child", "task", "b")));
     store.savePage(DAILY, tree, 10);
     store.addContext("new", "project");
@@ -154,22 +154,105 @@ describe("ObjectStore", () => {
     expect(again.objects.new).toMatchObject({
       contexts: ["project"],
       createdAt: 10,
+      origin: DAILY,
     });
+    expect(again.objects.child?.origin).toBe("new");
     store.savePage(DAILY, doc(), 30);
-    // 外れたObjectはゴミ箱へ移る。取り消しで戻すと、作成日時とContextが残る。
-    expect(
-      store
-        .trash()
-        .map((o) => o.id)
-        .sort(),
-    ).toEqual(["child", "new"]);
-    store.savePage(DAILY, tree, 40);
+    // 外れてもゴミ箱へは送らず、置き場所をなくした印だけ付ける。
+    // 子は書いた場所（newの本文）に残っているので、印は付かない。
     expect(store.trash()).toEqual([]);
+    const [lost, ...rest] = store.overview(0).homeless;
+    expect(rest).toEqual([]);
+    expect(lost).toMatchObject({
+      object: { id: "new" },
+      originId: DAILY,
+      originTitle: "Daily",
+    });
+    // 元の場所へ貼り直すと、印が外れる。作成日時とContextも残る。
+    store.savePage(DAILY, tree, 40);
+    expect(store.overview(0).homeless).toEqual([]);
     expect(store.getObject("new")).toMatchObject({
       contexts: ["project"],
       createdAt: 10,
+      origin: DAILY,
     });
     expect(store.getObject("child").title).toBe("b");
+  });
+
+  it("makes the page an object is pasted into its new origin", () => {
+    store.savePage(DAILY, doc(block("cut", "task", "切り取り")), 10);
+    store.savePage(DAILY, doc(), 11);
+    store.savePage("project", doc(block("cut", "task", "切り取り")), 12);
+    expect(store.getObject("cut").origin).toBe("project");
+    expect(store.overview(0).homeless).toEqual([]);
+    // 新しい書いた場所から外れれば、また印が付く。元のDailyの保存では付かない。
+    store.savePage(DAILY, doc(paragraph("p", text("別の段落"))), 13);
+    expect(store.overview(0).homeless).toEqual([]);
+    store.savePage("project", doc(), 14);
+    expect(store.overview(0).homeless.map((h) => h.originId)).toEqual([
+      "project",
+    ]);
+  });
+
+  it("follows a written window moved within one page without marking it", () => {
+    store.savePage(
+      DAILY,
+      doc(block("outer", "task", "外", block("inner", "task", "中"))),
+      10,
+    );
+    store.savePage(
+      DAILY,
+      doc(block("outer", "task", "外"), block("inner", "task", "中")),
+      11,
+    );
+    expect(store.getObject("inner").origin).toBe(DAILY);
+    expect(store.overview(0).homeless).toEqual([]);
+  });
+
+  it("does not mark other windows or objects made without a written place", () => {
+    store.createObject(
+      { id: "fromView", type: "task", title: "表から", parentId: null },
+      10,
+    );
+    expect(store.getObject("fromView").origin).toBeNull();
+    store.savePage(DAILY, doc(block("written", "task", "書いた")), 11);
+    const both = doc(
+      block("fromView", "task", "表から"),
+      block("written", "task", "書いた"),
+    );
+    store.savePage("project", both, 12);
+    // 窓を足しても、書いた場所は変わらない。
+    expect(store.getObject("written").origin).toBe(DAILY);
+    store.savePage("project", doc(), 13);
+    expect(store.overview(0).homeless).toEqual([]);
+    expect(store.trash()).toEqual([]);
+  });
+
+  it("keeps or restores an object without a place", () => {
+    store.savePage(DAILY, doc(block("lost", "task", "なくした")), 10);
+    store.savePage(DAILY, doc(), 11);
+    store.patchObject("lost", { origin: null }, 12);
+    expect(store.getObject("lost").origin).toBeNull();
+    expect(store.overview(0).homeless).toEqual([]);
+
+    store.savePage(DAILY, doc(block("binned", "task", "捨てた")), 13);
+    store.trashObject("binned", 14);
+    // ゴミ箱から戻したものは、元の場所に戻せるよう候補に出す。
+    store.restoreObject("binned");
+    expect(store.overview(0).homeless.map((h) => h.object.id)).toEqual([
+      "binned",
+    ]);
+  });
+
+  it("opens an object page with its title for embedding elsewhere", () => {
+    store.savePage(
+      DAILY,
+      doc(block("t", "task", "題", paragraph("p", text("本文")))),
+      10,
+    );
+    const page = store.loadPage("t");
+    expect(page.title).toEqual([text("題")]);
+    expect(store.loadPage(DAILY).title).toBeUndefined();
   });
 
   it("keeps an object moved from the Daily to a project in either save order", () => {
@@ -919,6 +1002,8 @@ describe("ObjectStore", () => {
       raw.exec(`
         INSERT INTO contexts VALUES ('person', 'area', 0), ('person', 'project', 1),
           ('memo', 'person', 0), ('memo', 'project', 1), ('note', 'person', 0);
+        ALTER TABLE objects DROP COLUMN origin;
+        ALTER TABLE objects DROP COLUMN homeless;
         PRAGMA user_version = 7;
       `);
       raw.close();
@@ -936,6 +1021,33 @@ describe("ObjectStore", () => {
             (entry) => entry.kind === "object" && entry.object.id === "person",
           ),
       ).toBe(true);
+      migrated.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("takes the origin of existing objects from where they are placed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pkm-store-"));
+    try {
+      const path = join(dir, "objects.sqlite");
+      const old = new ObjectStore(path);
+      old.savePage(DAILY, doc(block("placed", "task", "置いた")), 10);
+      old.createObject(
+        { id: "loose", type: "task", title: "どこにもない", parentId: null },
+        11,
+      );
+      old.close();
+      const raw = new Database(path);
+      raw.exec(`
+        ALTER TABLE objects DROP COLUMN origin;
+        ALTER TABLE objects DROP COLUMN homeless;
+        PRAGMA user_version = 9;
+      `);
+      raw.close();
+      const migrated = new ObjectStore(path);
+      expect(migrated.getObject("placed").origin).toBe(DAILY);
+      expect(migrated.getObject("loose").origin).toBeNull();
       migrated.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
